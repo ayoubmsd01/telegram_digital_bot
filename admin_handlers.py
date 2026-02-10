@@ -319,6 +319,11 @@ async def edit_field_selected(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def edit_new_value_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Update the product field."""
+    # Safety check
+    if 'edit_product_id' not in context.user_data or 'edit_field' not in context.user_data:
+        await update.message.reply_text("❌ Session expired. Please start again.")
+        return ConversationHandler.END
+    
     product_id = context.user_data['edit_product_id']
     field = context.user_data['edit_field']
     new_value = update.message.text
@@ -394,6 +399,9 @@ async def delete_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     text = update.message.text
     
     if text == "✅ YES, DELETE":
+        if 'delete_product_id' not in context.user_data:
+            await update.message.reply_text("❌ Session expired. Please start again.", reply_markup=ReplyKeyboardRemove())
+            return ConversationHandler.END
         product_id = context.user_data['delete_product_id']
         db.delete_product(product_id)
         await update.message.reply_text("✅ Product deleted!", reply_markup=ReplyKeyboardRemove())
@@ -445,6 +453,10 @@ async def stock_product_selected(update: Update, context: ContextTypes.DEFAULT_T
 
 async def stock_new_value_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Update product stock."""
+    if 'stock_product_id' not in context.user_data:
+        await update.message.reply_text("❌ Session expired. Please start again.")
+        return ConversationHandler.END
+    
     try:
         new_stock = int(update.message.text)
         product_id = context.user_data['stock_product_id']
@@ -501,6 +513,10 @@ async def codes_product_selected(update: Update, context: ContextTypes.DEFAULT_T
 
 async def codes_add_new_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Add new codes to product."""
+    if 'codes_product_id' not in context.user_data:
+        await update.message.reply_text("❌ Session expired. Please start again.")
+        return ConversationHandler.END
+        
     codes_text = update.message.text
     codes_list = [line.strip() for line in codes_text.split('\n') if line.strip()]
     
