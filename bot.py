@@ -10,6 +10,7 @@ import strings
 from crypto_pay import create_invoice
 import admin_handlers
 
+ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "").lower()
 
 load_dotenv()
@@ -327,6 +328,7 @@ def main() -> None:
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("ad", admin_command))
+    application.add_handler(CommandHandler("admin", admin_command))  # Alias for /ad
     application.add_handler(CallbackQueryHandler(language_callback, pattern="^lang_"))
     application.add_handler(CallbackQueryHandler(product_callback, pattern="^(prod_|buy_|back_to_products)"))
     application.add_handler(CallbackQueryHandler(cancel_order_callback, pattern="^cancel_"))

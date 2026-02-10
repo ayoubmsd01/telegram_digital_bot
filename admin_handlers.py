@@ -8,7 +8,8 @@ from telegram.ext import ContextTypes, ConversationHandler
 import database as db
 from strings import STRINGS
 
-# Get admin username from environment
+# Get admin credentials from environment
+ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "").lower()
 
 # Conversation states
@@ -16,10 +17,19 @@ ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "").lower()
  PRICE, STOCK, DELIVERY_VALUE, CODES_INPUT) = range(9)
 
 def is_admin(user) -> bool:
-    """Check if user is admin by username."""
-    if not user or not user.username:
+    """Check if user is admin by user_id or username."""
+    if not user:
         return False
-    return user.username.lower() == ADMIN_USERNAME
+    
+    # Check by user_id first (most reliable)
+    if ADMIN_USER_ID and user.id == ADMIN_USER_ID:
+        return True
+    
+    # Check by username as fallback
+    if ADMIN_USERNAME and user.username:
+        return user.username.lower() == ADMIN_USERNAME
+    
+    return False
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show admin panel menu."""
