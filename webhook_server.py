@@ -104,22 +104,47 @@ async def crypto_webhook(secret_path: str, request: Request):
             delivery_type = product["delivery_type"]
             value = product["delivery_value"]
             
-            msg_text = "Payment Received! Here is your product:\n\n"
+            msg_text = "🎁 Payment Received! Here is your product:\n\n"
             if lang == "ru":
-                 msg_text = "Оплата получена! Вот ваш товар:\n\n"
+                 msg_text = "🎁 Оплата получена! Вот ваш товар:\n\n"
                  
             try:
                 if delivery_type == "link":
-                    await bot.send_message(chat_id=user_id, text=f"{msg_text}{value}")
-                elif delivery_type == "code":
-                     await bot.send_message(chat_id=user_id, text=f"{msg_text}`{value}`", parse_mode="MarkdownV2")
+                    # Send URL link
+                    await bot.send_message(chat_id=user_id, text=f"{msg_text}🔗 {value}")
+                    
                 elif delivery_type == "file":
-                     if os.path.exists(value):
-                         await bot.send_document(chat_id=user_id, document=open(value, 'rb'), caption=msg_text)
-                     else:
-                         await bot.send_message(chat_id=user_id, text=f"{msg_text}File ID: {value}")
+                    # Send file using Telegram file_id
+                    await bot.send_document(chat_id=user_id, document=value, caption=msg_text)
+                    
+                elif delivery_type == "code":
+                    # Get one unused code for this product
+                    code_row = db.get_unused_code(product_id)
+                    
+                    if code_row:
+                        # Mark code as used
+                        db.mark_code_as_used(code_row["id"], user_id)
+                        
+                        # Send code to user
+                        code_text = code_row["code"]
+                        await bot.send_message(
+                            chat_id=user_id, 
+                            text=f"{msg_text}🔑 Your code:\n<code>{code_text}</code>", 
+                            parse_mode="HTML"
+                        )
+                    else:
+                        # No codes available
+                        await bot.send_message(
+                            chat_id=user_id, 
+                            text="⚠️ No codes available for this product. Please contact support."
+                        )
+                        
+                # Mark order as delivered
+                db.update_order_status(order["order_id"], "delivered")
+                
             except Exception as e:
                 print(f"Failed to deliver: {e}")
+                logger.error(f"Delivery error: {e}")
                 
     return {"ok": True}
 

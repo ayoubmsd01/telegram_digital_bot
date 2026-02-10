@@ -2,12 +2,15 @@ import logging
 import os
 import asyncio
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes, ConversationHandler
 from dotenv import load_dotenv
 
 import database as db
 import strings
 from crypto_pay import create_invoice
+import admin_handlers
+
+ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
 
 load_dotenv()
 
@@ -53,8 +56,15 @@ async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
     """Show the main menu keyboard."""
+    user_id = update.effective_user.id if update.effective_user else 0
+    
     text = strings.STRINGS[lang]["welcome"]
-    keyboard = strings.KEYBOARDS[lang]
+    keyboard = strings.KEYBOARDS[lang].copy()
+    
+    # Add Admin Panel button if user is admin
+    if user_id == ADMIN_USER_ID:
+        keyboard.insert(0, ["🛠 Admin Panel"])
+    
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     if update.message:
@@ -75,6 +85,14 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     text = update.message.text
     s = strings.STRINGS[lang]
     
+    # Admin Panel
+    if text == "🛠 Admin Panel":
+        await admin_handlers.admin_panel(update, context)
+        return
+    elif text == "➕ Add Product":
+        # This will be handled by ConversationHandler
+        return
+    
     if text == s["menu_products"]:
         await show_products(update, context, lang)
     elif text == s["menu_stock"]:
@@ -85,7 +103,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(s["help_text"])
     elif text == s["menu_projects"]:
         await update.message.reply_text(s["projects_text"])
-    elif text == s["back"]:
+    elif text == s["back"] or text == "⬅️ Back":
         await show_main_menu(update, context, lang)
     else:
         await update.message.reply_text(s["welcome"])
@@ -288,6 +306,28 @@ def main() -> None:
         return
         
     application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+
+    # Add Product ConversationHandler
+    add_product_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^➕ Add Product$"), admin_handlers.start_add_product)],
+        states={
+            admin_handlers.CHOOSING_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.product_type_chosen)],
+            admin_handlers.TITLE_EN: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.title_en_received)],
+            admin_handlers.TITLE_RU: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.title_ru_received)],
+            admin_handlers.DESC_EN: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.desc_en_received)],
+            admin_handlers.DESC_RU: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.desc_ru_received)],
+            admin_handlers.PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.price_received)],
+            admin_handlers.STOCK: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.stock_received)],
+            admin_handlers.DELIVERY_VALUE: [
+                MessageHandler((filters.TEXT | filters.Document.ALL | filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, 
+                              admin_handlers.delivery_value_received)
+            ],
+            admin_handlers.CODES_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.codes_received)],
+        },
+        fallbacks=[MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation)],
+    )
+    
+    application.add_handler(add_product_handler)
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CallbackQueryHandler(language_callback, pattern="^lang_"))

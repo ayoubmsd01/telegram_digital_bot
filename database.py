@@ -69,9 +69,22 @@ def init_db():
             user_id INTEGER,
             product_id INTEGER,
             invoice_id INTEGER,
-            status TEXT DEFAULT 'pending', -- 'pending', 'paid', 'delivered'
+            status TEXT DEFAULT 'pending', -- 'pending', 'paid', 'delivered', 'canceled'
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(user_id) REFERENCES users(user_id),
+            FOREIGN KEY(product_id) REFERENCES products(product_id)
+        )
+    ''')
+    
+    # Codes table for code-based products
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS codes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL,
+            code TEXT NOT NULL,
+            is_used INTEGER DEFAULT 0,
+            used_by INTEGER,
+            used_at TIMESTAMP,
             FOREIGN KEY(product_id) REFERENCES products(product_id)
         )
     ''')
@@ -176,6 +189,83 @@ def cancel_order_db(order_id):
         return True
     conn.close()
     return False
+
+# Code management functions
+def get_unused_code(product_id):
+    """Get one unused code for a product."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM codes WHERE product_id = ? AND is_used = 0 LIMIT 1', (product_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return row
+
+def mark_code_as_used(code_id, user_id):
+    """Mark a code as used."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE codes 
+        SET is_used = 1, used_by = ?, used_at = CURRENT_TIMESTAMP 
+        WHERE id = ?
+    ''', (user_id, code_id))
+    conn.commit()
+    conn.close()
+
+def add_codes_bulk(product_id, codes_list):
+    """Add multiple codes for a product."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    codes_data = [(product_id, code.strip()) for code in codes_list if code.strip()]
+    cursor.executemany('INSERT INTO codes (product_id, code) VALUES (?, ?)', codes_data)
+    conn.commit()
+    count = cursor.rowcount
+    conn.close()
+    return count
+
+def get_codes_count(product_id):
+    """Get count of unused codes for a product."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM codes WHERE product_id = ? AND is_used = 0', (product_id,))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+# Product management functions
+def add_product(title_en, title_ru, desc_en, desc_ru, price_usd, stock, delivery_type, delivery_value):
+    """Add a new product."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO products (title_en, title_ru, desc_en, desc_ru, price_usd, stock, delivery_type, delivery_value)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+    ''', (title_en, title_ru, desc_en, desc_ru, price_usd, stock, delivery_type, delivery_value))
+    product_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return product_id
+
+def update_product(product_id, title_en, title_ru, desc_en, desc_ru, price_usd, stock, delivery_value):
+    """Update an existing product."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE products 
+        SET title_en = ?, title_ru = ?, desc_en = ?, desc_ru = ?, price_usd = ?, stock = ?, delivery_value = ?
+        WHERE product_id = ?
+    ''', (title_en, title_ru, desc_en, desc_ru, price_usd, stock, delivery_value, product_id))
+    conn.commit()
+    conn.close()
+
+def delete_product(product_id):
+    """Delete a product and its codes."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM codes WHERE product_id = ?', (product_id,))
+    cursor.execute('DELETE FROM products WHERE product_id = ?', (product_id,))
+    conn.commit()
+    conn.close()
 
 if __name__ == "__main__":
     init_db()
