@@ -1,0 +1,308 @@
+import logging
+import os
+import asyncio
+from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
+from telegram.ext import Application, CommandHandler, MessageHandler, CallbackQueryHandler, filters, ContextTypes
+from dotenv import load_dotenv
+
+import database as db
+import strings
+from crypto_pay import create_invoice
+
+load_dotenv()
+
+# Enable logging
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
+
+BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+
+# Keyboards
+LANG_KEYBOARD = InlineKeyboardMarkup([
+    [InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru"),
+     InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")]
+])
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Send a message when the command /start is issued."""
+    user = update.effective_user
+    db_lang = db.get_user_language(user.id)
+    
+    if db_lang:
+        await show_main_menu(update, context, db_lang)
+    else:
+        await update.message.reply_text(
+            "Welcome! Please choose your language.\nДобро пожаловать! Пожалуйста, выберите язык.",
+            reply_markup=LANG_KEYBOARD
+        )
+
+async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle language selection."""
+    query = update.callback_query
+    await query.answer()
+    
+    lang = query.data.split("_")[1]
+    user_id = query.from_user.id
+    
+    db.add_user(user_id, lang)
+    
+    await query.edit_message_text(text=f"Language set to {lang.upper()}")
+    await show_main_menu(update, context, lang)
+
+async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    """Show the main menu keyboard."""
+    text = strings.STRINGS[lang]["welcome"]
+    keyboard = strings.KEYBOARDS[lang]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
+    if update.message:
+        await update.message.reply_text(text, reply_markup=reply_markup)
+    elif update.callback_query:
+        # If called from callback, we can't reply with ReplyKeyboard easily in edit_message, 
+        # so we delete the old message or just send a new one.
+        await update.callback_query.message.reply_text(text, reply_markup=reply_markup)
+
+async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle menu button clicks."""
+    user_id = update.effective_user.id
+    lang = db.get_user_language(user_id)
+    if not lang:
+        await start(update, context) # Fallback
+        return
+
+    text = update.message.text
+    s = strings.STRINGS[lang]
+    
+    if text == s["menu_products"]:
+        await show_products(update, context, lang)
+    elif text == s["menu_stock"]:
+        await show_stock(update, context, lang)
+    elif text == s["menu_rules"]:
+        await update.message.reply_text(s["rules_text"])
+    elif text == s["menu_help"]:
+        await update.message.reply_text(s["help_text"])
+    elif text == s["menu_projects"]:
+        await update.message.reply_text(s["projects_text"])
+    elif text == s["back"]:
+        await show_main_menu(update, context, lang)
+    else:
+        await update.message.reply_text(s["welcome"])
+
+async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    products = db.get_products()
+    s = strings.STRINGS[lang]
+    
+    if not products:
+        await update.message.reply_text("No products available.")
+        return
+
+    keyboard = []
+    for p in products:
+        p_id = p["product_id"]
+        title = p["title_ru"] if lang == "ru" else p["title_en"]
+        price = p["price_usd"]
+        stock = p["stock"]
+        
+        if stock > 0:
+            btn_text = f"{title} - ${price}"
+            keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"prod_{p_id}")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    await update.message.reply_text(s["choose_product"], reply_markup=reply_markup)
+
+async def show_stock(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    products = db.get_products()
+    s = strings.STRINGS[lang]
+    msg = s["stock_title"] + "\n\n"
+    
+    for p in products:
+        title = p["title_ru"] if lang == "ru" else p["title_en"]
+        stock = p["stock"]
+        msg += f"• {title}: {stock} pcs\n"
+        
+    await update.message.reply_text(msg)
+
+async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    user_id = query.from_user.id
+    lang = db.get_user_language(user_id) or "en"
+    s = strings.STRINGS[lang]
+
+    if data.startswith("prod_"):
+        p_id = int(data.split("_")[1])
+        product = db.get_product(p_id)
+        if not product:
+            await query.edit_message_text("Product not found.")
+            return
+
+        title = product["title_ru"] if lang == "ru" else product["title_en"]
+        desc = product["desc_ru"] if lang == "ru" else product["desc_en"]
+        price = product["price_usd"]
+        stock = product["stock"]
+        
+        if stock <= 0:
+            await query.edit_message_text(s["out_of_stock"])
+            return
+            
+        text = f"<b>{title}</b>\n\n{desc}\n\nPrice: ${price}\nStock: {stock}"
+        
+        keyboard = [
+            [InlineKeyboardButton(s["buy_button"].format(price=price), callback_data=f"buy_{p_id}")],
+            [InlineKeyboardButton(s["back"], callback_data="back_to_products")] 
+        ]
+        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        
+    elif data.startswith("buy_"):
+        p_id = int(data.split("_")[1])
+        product = db.get_product(p_id)
+        
+        if not product or product["stock"] <= 0:
+            await query.message.reply_text(s["out_of_stock"])
+            return
+
+        # Decrease Stock immediately (Reservation)
+        db.decrease_stock(p_id)
+
+        try:
+            invoice = create_invoice(
+                amount=product["price_usd"],
+                currency="USD",
+                description=f"Buying {product['title_en']}",
+                payload=f"{user_id}:{p_id}" 
+            )
+            
+            if invoice and invoice.get("ok"):
+                result = invoice["result"]
+                invoice_id = result["invoice_id"]
+                pay_url = result["pay_url"] # Or bot_invoice_url
+                
+                # Create Order in DB
+                order_id = db.create_order(user_id, p_id, invoice_id)
+                
+                msg_text = (
+                    f"🧾 <b>Invocie #{invoice_id}</b>\n"
+                    f"📦 Product: {product['title_en']}\n"
+                    f"💰 Price: ${product['price_usd']}\n\n"
+                    f"⏳ Stock reserved for 15 minutes.\n"
+                    f"✅ Please pay using the link below:"
+                    if lang == "en" else
+                    f"🧾 <b>Счет #{invoice_id}</b>\n"
+                    f"📦 Товар: {product['title_ru']}\n"
+                    f"💰 Цена: ${product['price_usd']}\n\n"
+                    f"⏳ Товар зарезервирован на 15 минут.\n"
+                    f"✅ Оплатите по ссылке ниже:"
+                )
+                
+                keyboard = [
+                    [InlineKeyboardButton(s["pay_link"], url=pay_url)],
+                    [InlineKeyboardButton("❌ Cancel Order / Отменить", callback_data=f"cancel_{order_id}_{invoice_id}")]
+                ]
+                await query.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+            else:
+                # Failed to create invoice, restore stock
+                db.increase_stock(p_id)
+                logger.error(f"Invoice creation failed: {invoice}")
+                await query.message.reply_text("Error creating invoice. Please try again.")
+        except Exception as e:
+            # Restore stock on error
+            db.increase_stock(p_id)
+            logger.error(f"Error: {e}")
+            await query.message.reply_text("System error.")
+
+    elif data == "back_to_products":
+        # Re-show product lists
+        products = db.get_products()
+        keyboard = []
+        for p in products:
+            p_id = p["product_id"]
+            title = p["title_ru"] if lang == "ru" else p["title_en"]
+            price = p["price_usd"]
+            stock = p["stock"]
+            if stock > 0:
+                btn_text = f"{title} - ${price}"
+                keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"prod_{p_id}")])
+        
+        await query.edit_message_text(s["choose_product"], reply_markup=InlineKeyboardMarkup(keyboard))
+
+async def cancel_order_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    data = query.data
+    
+    # format: cancel_{order_id}_{invoice_id}
+    parts = data.split("_")
+    order_id = int(parts[1])
+    invoice_id = int(parts[2])
+    
+    # Cancel in DB and restore stock
+    success = db.cancel_order_db(order_id)
+    
+    if success:
+        # Delete invoice from CryptoBot
+        from crypto_pay import delete_invoice
+        try:
+            delete_invoice(invoice_id)
+        except:
+            pass
+        await query.edit_message_text(f"❌ Order #{order_id} canceled. Stock returned.")
+    else:
+        await query.edit_message_text("Order already processed or expired.")
+
+async def check_expirations(context: ContextTypes.DEFAULT_TYPE):
+    """Background task to cancel expired orders."""
+    expired_orders = db.get_expired_pending_orders(minutes=15)
+    for order in expired_orders:
+        order_id = order["order_id"]
+        invoice_id = order["invoice_id"]
+        # Cancel logic
+        if db.cancel_order_db(order_id):
+            print(f"Auto-canceled expired order #{order_id}")
+            # Try delete invoice
+            from crypto_pay import delete_invoice
+            try:
+                delete_invoice(invoice_id)
+            except:
+                pass
+
+async def post_init(application: Application) -> None:
+    # Use create_task on the loop
+    application.create_task(background_expiration_loop())
+
+async def background_expiration_loop():
+    while True:
+        try:
+            await check_expirations(None)
+        except Exception as e:
+            print(f"Expiration task error: {e}")
+        await asyncio.sleep(60)
+
+def main() -> None:
+    """Run the bot."""
+    if not BOT_TOKEN:
+        print("Error: TELEGRAM_BOT_TOKEN not found in .env")
+        return
+        
+    application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+
+    application.add_handler(CommandHandler("start", start))
+    application.add_handler(CallbackQueryHandler(language_callback, pattern="^lang_"))
+    application.add_handler(CallbackQueryHandler(product_callback, pattern="^(prod_|buy_|back_to_products)"))
+    application.add_handler(CallbackQueryHandler(cancel_order_callback, pattern="^cancel_"))
+    
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler))
+
+    print("Bot is polling...")
+    application.run_polling()
+
+async def expiration_task():
+    while True:
+        await check_expirations(None)
+        await asyncio.sleep(60)
+
+if __name__ == "__main__":
+    main()
