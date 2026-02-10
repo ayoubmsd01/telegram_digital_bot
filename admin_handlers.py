@@ -31,12 +31,18 @@ def is_admin(user) -> bool:
     
     return False
 
+def get_lang(user_id):
+    """Get user language with fallback."""
+    return db.get_user_language(user_id) or "en"
+
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show admin panel menu."""
     user = update.effective_user
+    lang = get_lang(user.id)
+    s = STRINGS[lang]
     
     if not is_admin(user):
-        await update.message.reply_text(STRINGS["not_authorized"])
+        await update.message.reply_text(s["not_authorized"])
         return
     
     keyboard = [
@@ -47,22 +53,24 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
     ]
     
     await update.message.reply_text(
-        STRINGS["admin_menu"],
+        s["admin_menu"],
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
 async def start_add_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the add product conversation."""
     user = update.effective_user
+    lang = get_lang(user.id)
+    s = STRINGS[lang]
     
     if not is_admin(user):
-        await update.message.reply_text(STRINGS["not_authorized"])
+        await update.message.reply_text(s["not_authorized"])
         return ConversationHandler.END
     
-    keyboard = [["link"], ["file"], ["code"], ["Cancel"]]
+    keyboard = [[" link"], ["file"], ["code"], ["Cancel"]]
     
     await update.message.reply_text(
-        STRINGS["choose_product_type"],
+        s["choose_product_type"],
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
     )
     
@@ -70,57 +78,71 @@ async def start_add_product(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def product_type_chosen(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle product type selection."""
+    lang = get_lang(update.effective_user.id)
+    s = STRINGS[lang]
     text = update.message.text.lower()
     
     if text == "cancel":
-        await update.message.reply_text(STRINGS["operation_canceled"], reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text(s["operation_canceled"], reply_markup=ReplyKeyboardRemove())
         return ConversationHandler.END
     
     if text not in ["link", "file", "code"]:
-        await update.message.reply_text(STRINGS["invalid_input"])
+        await update.message.reply_text(s["invalid_input"])
         return CHOOSING_TYPE
     
     context.user_data['product_type'] = text
-    await update.message.reply_text(STRINGS["enter_title_en"], reply_markup=ReplyKeyboardRemove())
+    await update.message.reply_text(s["enter_title_en"], reply_markup=ReplyKeyboardRemove())
     return TITLE_EN
 
 async def title_en_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Save English title."""
+    lang = get_lang(update.effective_user.id)
+    s = STRINGS[lang]
     context.user_data['title_en'] = update.message.text
-    await update.message.reply_text(STRINGS["enter_title_ru"])
+    await update.message.reply_text(s["enter_title_ru"])
     return TITLE_RU
 
 async def title_ru_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Save Russian title."""
+    lang = get_lang(update.effective_user.id)
+    s = STRINGS[lang]
     context.user_data['title_ru'] = update.message.text
-    await update.message.reply_text(STRINGS["enter_desc_en"])
+    await update.message.reply_text(s["enter_desc_en"])
     return DESC_EN
 
 async def desc_en_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Save English description."""
+    lang = get_lang(update.effective_user.id)
+    s = STRINGS[lang]
     context.user_data['desc_en'] = update.message.text
-    await update.message.reply_text(STRINGS["enter_desc_ru"])
+    await update.message.reply_text(s["enter_desc_ru"])
     return DESC_RU
 
 async def desc_ru_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Save Russian description."""
+    lang = get_lang(update.effective_user.id)
+    s = STRINGS[lang]
     context.user_data['desc_ru'] = update.message.text
-    await update.message.reply_text(STRINGS["enter_price"])
+    await update.message.reply_text(s["enter_price"])
     return PRICE
 
 async def price_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Save price."""
+    lang = get_lang(update.effective_user.id)
+    s = STRINGS[lang]
     try:
         price = float(update.message.text)
         context.user_data['price'] = price
-        await update.message.reply_text(STRINGS["enter_stock"])
+        await update.message.reply_text(s["enter_stock"])
         return STOCK
     except ValueError:
-        await update.message.reply_text(STRINGS["invalid_input"])
+        await update.message.reply_text(s["invalid_input"])
         return PRICE
 
 async def stock_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Save stock and request delivery value."""
+    lang = get_lang(update.effective_user.id)
+    s = STRINGS[lang]
     try:
         stock = int(update.message.text)
         context.user_data['stock'] = stock
@@ -128,20 +150,22 @@ async def stock_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
         product_type = context.user_data['product_type']
         
         if product_type == "link":
-            await update.message.reply_text(STRINGS["enter_link"])
+            await update.message.reply_text(s["enter_link"])
             return DELIVERY_VALUE
         elif product_type == "file":
-            await update.message.reply_text(STRINGS["send_file"])
+            await update.message.reply_text(s["send_file"])
             return DELIVERY_VALUE
         elif product_type == "code":
-            await update.message.reply_text(STRINGS["send_codes"])
+            await update.message.reply_text(s["send_codes"])
             return CODES_INPUT
     except ValueError:
-        await update.message.reply_text(STRINGS["invalid_input"])
+        await update.message.reply_text(s["invalid_input"])
         return STOCK
 
 async def delivery_value_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle delivery value (link or file)."""
+    lang = get_lang(update.effective_user.id)
+    s = STRINGS[lang]
     product_type = context.user_data['product_type']
     
     if product_type == "link":
@@ -158,7 +182,7 @@ async def delivery_value_received(update: Update, context: ContextTypes.DEFAULT_
         elif update.message.video:
             file_id = update.message.video.file_id
         else:
-            await update.message.reply_text(STRINGS["invalid_input"])
+            await update.message.reply_text(s["invalid_input"])
             return DELIVERY_VALUE
         
         context.user_data['delivery_value'] = file_id
@@ -176,6 +200,8 @@ async def codes_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def finalize_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Create the product in database."""
+    lang = get_lang(update.effective_user.id)
+    s = STRINGS[lang]
     data = context.user_data
     
     # Add product to database
@@ -194,11 +220,11 @@ async def finalize_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     if data['product_type'] == 'code' and 'codes' in data:
         count = db.add_codes_bulk(product_id, data['codes'])
         await update.message.reply_text(
-            STRINGS["product_created"].format(product_id=product_id) + "\n" + 
-            STRINGS["codes_added"].format(count=count)
+            s["product_created"].format(product_id=product_id) + "\n" + 
+            s["codes_added"].format(count=count)
         )
     else:
-        await update.message.reply_text(STRINGS["product_created"].format(product_id=product_id))
+        await update.message.reply_text(s["product_created"].format(product_id=product_id))
     
     # Clear user data
     context.user_data.clear()
@@ -207,6 +233,8 @@ async def finalize_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel the conversation."""
-    await update.message.reply_text(STRINGS["operation_canceled"], reply_markup=ReplyKeyboardRemove())
+    lang = get_lang(update.effective_user.id)
+    s = STRINGS[lang]
+    await update.message.reply_text(s["operation_canceled"], reply_markup=ReplyKeyboardRemove())
     context.user_data.clear()
     return ConversationHandler.END
