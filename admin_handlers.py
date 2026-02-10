@@ -47,6 +47,17 @@ def get_lang(user_id):
     """Get user language with fallback."""
     return db.get_user_language(user_id) or "en"
 
+def is_command_button(text: str) -> bool:
+    """Check if the text is one of the admin panel buttons."""
+    if not text:
+        return False
+    buttons = [
+        "➕ Add Product", "✏️ Edit Product", "🗑️ Delete Product",
+        "📦 Manage Stock", "📤 Manage Files", "🔑 Manage Codes",
+        "📊 Recent Orders", "⬅️ Back", "/start", "/admin", "/ad"
+    ]
+    return text in buttons or text.startswith("/")
+
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show admin panel menu."""
     user = update.effective_user
@@ -144,9 +155,15 @@ async def desc_ru_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def price_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Save price."""
+    text = update.message.text
+    if is_command_button(text):
+        await update.message.reply_text("⚠️ Operation cancelled. Select the command again.", reply_markup=ReplyKeyboardRemove())
+        context.user_data.clear()
+        return ConversationHandler.END
+        
     lang = get_lang(update.effective_user.id)
     s = STRINGS[lang]
-    text = update.message.text.strip().replace(',', '.')
+    text = text.strip().replace(',', '.')
     try:
         price = float(text)
         context.user_data['price'] = price
@@ -158,10 +175,16 @@ async def price_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 
 async def stock_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Save stock and request delivery value."""
+    text = update.message.text
+    if is_command_button(text):
+        await update.message.reply_text("⚠️ Operation cancelled. Select the command again.", reply_markup=ReplyKeyboardRemove())
+        context.user_data.clear()
+        return ConversationHandler.END
+        
     lang = get_lang(update.effective_user.id)
     s = STRINGS[lang]
     try:
-        text = update.message.text.strip().replace(',', '.')
+        text = text.strip().replace(',', '.')
         stock = int(float(text))
         context.user_data['stock'] = stock
         
@@ -326,9 +349,15 @@ async def edit_new_value_received(update: Update, context: ContextTypes.DEFAULT_
         await update.message.reply_text("❌ Session expired. Please start again.")
         return ConversationHandler.END
     
+    text = update.message.text
+    if is_command_button(text):
+        await update.message.reply_text("⚠️ Edit cancelled. Select the command again.", reply_markup=ReplyKeyboardRemove())
+        context.user_data.clear()
+        return ConversationHandler.END
+        
     product_id = context.user_data['edit_product_id']
     field = context.user_data['edit_field']
-    new_value_str = update.message.text.strip().replace(',', '.')
+    new_value_str = text.strip().replace(',', '.')
     
     # Convert to appropriate type
     if field in ['price_usd']:
@@ -459,8 +488,14 @@ async def stock_new_value_received(update: Update, context: ContextTypes.DEFAULT
         await update.message.reply_text("❌ Session expired. Please start again.")
         return ConversationHandler.END
     
+    text = update.message.text
+    if is_command_button(text):
+        await update.message.reply_text("⚠️ Operation cancelled. Select the command again.", reply_markup=ReplyKeyboardRemove())
+        context.user_data.clear()
+        return ConversationHandler.END
+
     try:
-        text = update.message.text.strip().replace(',', '.')
+        text = text.strip().replace(',', '.')
         new_stock = int(float(text))
         product_id = context.user_data['stock_product_id']
         
