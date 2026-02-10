@@ -310,18 +310,18 @@ def main() -> None:
     add_product_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^➕ Add Product$"), admin_handlers.start_add_product)],
         states={
-            admin_handlers.CHOOSING_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.product_type_chosen)],
-            admin_handlers.TITLE_EN: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.title_en_received)],
-            admin_handlers.TITLE_RU: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.title_ru_received)],
-            admin_handlers.DESC_EN: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.desc_en_received)],
-            admin_handlers.DESC_RU: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.desc_ru_received)],
-            admin_handlers.PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.price_received)],
-            admin_handlers.STOCK: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.stock_received)],
+            admin_handlers.CHOOSING_TYPE: [MessageHandler(filters.TEXT, admin_handlers.product_type_chosen)],
+            admin_handlers.TITLE_EN: [MessageHandler(filters.TEXT, admin_handlers.title_en_received)],
+            admin_handlers.TITLE_RU: [MessageHandler(filters.TEXT, admin_handlers.title_ru_received)],
+            admin_handlers.DESC_EN: [MessageHandler(filters.TEXT, admin_handlers.desc_en_received)],
+            admin_handlers.DESC_RU: [MessageHandler(filters.TEXT, admin_handlers.desc_ru_received)],
+            admin_handlers.PRICE: [MessageHandler(filters.TEXT, admin_handlers.price_received)],
+            admin_handlers.STOCK: [MessageHandler(filters.TEXT, admin_handlers.stock_received)],
             admin_handlers.DELIVERY_VALUE: [
                 MessageHandler((filters.TEXT | filters.Document.ALL | filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, 
                               admin_handlers.delivery_value_received)
             ],
-            admin_handlers.CODES_INPUT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.codes_received)],
+            admin_handlers.CODES_INPUT: [MessageHandler(filters.TEXT, admin_handlers.codes_received)],
         },
         fallbacks=[MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation)],
     )
@@ -332,9 +332,9 @@ def main() -> None:
     edit_product_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^✏️ Edit Product$"), admin_handlers.start_edit_product)],
         states={
-            admin_handlers.EDIT_SELECT_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.edit_product_selected)],
-            admin_handlers.EDIT_SELECT_FIELD: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.edit_field_selected)],
-            admin_handlers.EDIT_NEW_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.edit_new_value_received)],
+            admin_handlers.EDIT_SELECT_PRODUCT: [MessageHandler(filters.TEXT, admin_handlers.edit_product_selected)],
+            admin_handlers.EDIT_SELECT_FIELD: [MessageHandler(filters.TEXT, admin_handlers.edit_field_selected)],
+            admin_handlers.EDIT_NEW_VALUE: [MessageHandler(filters.TEXT, admin_handlers.edit_new_value_received)],
         },
         fallbacks=[MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation)],
     )
@@ -344,8 +344,8 @@ def main() -> None:
     delete_product_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^🗑️ Delete Product$"), admin_handlers.start_delete_product)],
         states={
-            admin_handlers.DELETE_SELECT_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.delete_product_selected)],
-            admin_handlers.DELETE_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.delete_confirmed)],
+            admin_handlers.DELETE_SELECT_PRODUCT: [MessageHandler(filters.TEXT, admin_handlers.delete_product_selected)],
+            admin_handlers.DELETE_CONFIRM: [MessageHandler(filters.TEXT, admin_handlers.delete_confirmed)],
         },
         fallbacks=[MessageHandler(filters.Regex("^(Cancel|❌ Cancel)$"), admin_handlers.cancel_conversation)],
     )
@@ -355,8 +355,8 @@ def main() -> None:
     manage_stock_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^📦 Manage Stock$"), admin_handlers.start_manage_stock)],
         states={
-            admin_handlers.STOCK_SELECT_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.stock_product_selected)],
-            admin_handlers.STOCK_NEW_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.stock_new_value_received)],
+            admin_handlers.STOCK_SELECT_PRODUCT: [MessageHandler(filters.TEXT, admin_handlers.stock_product_selected)],
+            admin_handlers.STOCK_NEW_VALUE: [MessageHandler(filters.TEXT, admin_handlers.stock_new_value_received)],
         },
         fallbacks=[MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation)],
     )
@@ -366,8 +366,8 @@ def main() -> None:
     manage_codes_handler = ConversationHandler(
         entry_points=[MessageHandler(filters.Regex("^🔑 Manage Codes$"), admin_handlers.start_manage_codes)],
         states={
-            admin_handlers.CODES_SELECT_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.codes_product_selected)],
-            admin_handlers.CODES_ADD_NEW: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.codes_add_new_received)],
+            admin_handlers.CODES_SELECT_PRODUCT: [MessageHandler(filters.TEXT, admin_handlers.codes_product_selected)],
+            admin_handlers.CODES_ADD_NEW: [MessageHandler(filters.TEXT, admin_handlers.codes_add_new_received)],
         },
         fallbacks=[MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation)],
     )
@@ -383,7 +383,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(product_callback, pattern="^(prod_|buy_|back_to_products)"))
     application.add_handler(CallbackQueryHandler(cancel_order_callback, pattern="^cancel_"))
     
-    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, menu_handler))
+    application.add_handler(MessageHandler(filters.TEXT, menu_handler))
 
     print("Bot is polling...")
     application.run_polling()
