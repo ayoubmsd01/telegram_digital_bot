@@ -45,11 +45,10 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(s["not_authorized"])
         return
     
+    # Only show implemented features
     keyboard = [
-        ["➕ Add Product", "✏️ Edit Product"],
-        ["🗑️ Delete Product", "📦 Manage Stock"],
-        ["📤 Manage Files", "🔑 Manage Codes"],
-        ["📊 Recent Orders", "⬅️ Back"]
+        ["➕ Add Product"],
+        ["⬅️ Back"]
     ]
     
     await update.message.reply_text(
