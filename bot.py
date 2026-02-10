@@ -10,7 +10,7 @@ import strings
 from crypto_pay import create_invoice
 import admin_handlers
 
-ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "").lower()
 
 load_dotenv()
 
@@ -34,8 +34,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     db_lang = db.get_user_language(user.id)
     
     if db_lang:
+        # User already has language set, skip selection
         await show_main_menu(update, context, db_lang)
     else:
+        # First time user, ask for language
         await update.message.reply_text(
             "Welcome! Please choose your language.\nДобро пожаловать! Пожалуйста, выберите язык.",
             reply_markup=LANG_KEYBOARD
@@ -54,16 +56,18 @@ async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.edit_message_text(text=f"Language set to {lang.upper()}")
     await show_main_menu(update, context, lang)
 
+async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle /ad command to open admin panel."""
+    await admin_handlers.admin_panel(update, context)
+
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
     """Show the main menu keyboard."""
-    user_id = update.effective_user.id if update.effective_user else 0
+    user = update.effective_user
     
     text = strings.STRINGS[lang]["welcome"]
     keyboard = strings.KEYBOARDS[lang].copy()
     
-    # Add Admin Panel button if user is admin
-    if user_id == ADMIN_USER_ID:
-        keyboard.insert(0, ["🛠 Admin Panel"])
+    # Don't add Admin Panel button here - only via /ad command
     
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
@@ -84,14 +88,6 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
 
     text = update.message.text
     s = strings.STRINGS[lang]
-    
-    # Admin Panel
-    if text == "🛠 Admin Panel":
-        await admin_handlers.admin_panel(update, context)
-        return
-    elif text == "➕ Add Product":
-        # This will be handled by ConversationHandler
-        return
     
     if text == s["menu_products"]:
         await show_products(update, context, lang)
@@ -330,6 +326,7 @@ def main() -> None:
     application.add_handler(add_product_handler)
 
     application.add_handler(CommandHandler("start", start))
+    application.add_handler(CommandHandler("ad", admin_command))
     application.add_handler(CallbackQueryHandler(language_callback, pattern="^lang_"))
     application.add_handler(CallbackQueryHandler(product_callback, pattern="^(prod_|buy_|back_to_products)"))
     application.add_handler(CallbackQueryHandler(cancel_order_callback, pattern="^cancel_"))

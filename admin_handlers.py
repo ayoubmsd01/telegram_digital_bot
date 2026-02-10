@@ -8,22 +8,24 @@ from telegram.ext import ContextTypes, ConversationHandler
 import database as db
 from strings import STRINGS
 
-# Get admin user ID from environment
-ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
+# Get admin username from environment
+ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "").lower()
 
 # Conversation states
 (CHOOSING_TYPE, TITLE_EN, TITLE_RU, DESC_EN, DESC_RU, 
  PRICE, STOCK, DELIVERY_VALUE, CODES_INPUT) = range(9)
 
-def is_admin(user_id: int) -> bool:
-    """Check if user is admin."""
-    return user_id == ADMIN_USER_ID
+def is_admin(user) -> bool:
+    """Check if user is admin by username."""
+    if not user or not user.username:
+        return False
+    return user.username.lower() == ADMIN_USERNAME
 
 async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show admin panel menu."""
-    user_id = update.effective_user.id
+    user = update.effective_user
     
-    if not is_admin(user_id):
+    if not is_admin(user):
         await update.message.reply_text(STRINGS["not_authorized"])
         return
     
@@ -41,9 +43,9 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
 
 async def start_add_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the add product conversation."""
-    user_id = update.effective_user.id
+    user = update.effective_user
     
-    if not is_admin(user_id):
+    if not is_admin(user):
         await update.message.reply_text(STRINGS["not_authorized"])
         return ConversationHandler.END
     
