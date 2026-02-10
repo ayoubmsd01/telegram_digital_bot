@@ -146,13 +146,14 @@ async def price_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     """Save price."""
     lang = get_lang(update.effective_user.id)
     s = STRINGS[lang]
+    text = update.message.text.strip().replace(',', '.')
     try:
-        price = float(update.message.text)
+        price = float(text)
         context.user_data['price'] = price
         await update.message.reply_text(s["enter_stock"])
         return STOCK
     except ValueError:
-        await update.message.reply_text(s["invalid_input"])
+        await update.message.reply_text(f"❌ Invalid price: '{text}'. Please use dot format (e.g. 9.99)")
         return PRICE
 
 async def stock_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -160,7 +161,8 @@ async def stock_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     lang = get_lang(update.effective_user.id)
     s = STRINGS[lang]
     try:
-        stock = int(update.message.text)
+        text = update.message.text.strip().replace(',', '.')
+        stock = int(float(text))
         context.user_data['stock'] = stock
         
         product_type = context.user_data['product_type']
@@ -326,20 +328,20 @@ async def edit_new_value_received(update: Update, context: ContextTypes.DEFAULT_
     
     product_id = context.user_data['edit_product_id']
     field = context.user_data['edit_field']
-    new_value = update.message.text
+    new_value_str = update.message.text.strip().replace(',', '.')
     
     # Convert to appropriate type
     if field in ['price_usd']:
         try:
-            new_value = float(new_value)
+            new_value = float(new_value_str)
         except ValueError:
-            await update.message.reply_text("❌ Invalid number.")
+            await update.message.reply_text(f"❌ Invalid number: '{new_value_str}'. Please enter a valid price (e.g. 5.99).")
             return EDIT_NEW_VALUE
     elif field == 'stock':
         try:
-            new_value = int(new_value)
+            new_value = int(float(new_value_str))
         except ValueError:
-            await update.message.reply_text("❌ Invalid number.")
+            await update.message.reply_text(f"❌ Invalid number: '{new_value_str}'. Please enter a valid integer.")
             return EDIT_NEW_VALUE
     
    # Update in database
@@ -458,7 +460,8 @@ async def stock_new_value_received(update: Update, context: ContextTypes.DEFAULT
         return ConversationHandler.END
     
     try:
-        new_stock = int(update.message.text)
+        text = update.message.text.strip().replace(',', '.')
+        new_stock = int(float(text))
         product_id = context.user_data['stock_product_id']
         
         db.update_product_field(product_id, 'stock', new_stock)
@@ -467,7 +470,8 @@ async def stock_new_value_received(update: Update, context: ContextTypes.DEFAULT
         context.user_data.clear()
         return ConversationHandler.END
     except ValueError:
-        await update.message.reply_text("❌ Invalid number.")
+        await update.message.reply_text(f"❌ Invalid number: '{update.message.text}'. Please enter a valid integer.")
+        return STOCK_NEW_VALUE
         return STOCK_NEW_VALUE
 
 # ============================================================================
