@@ -90,16 +90,6 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     text = update.message.text
     s = strings.STRINGS[lang]
     
-    # Admin Panel buttons - handled by ConversationHandler, so ignore them here
-    admin_buttons = [
-        "➕ Add Product", "✏️ Edit Product", "🗑️ Delete Product",
-        "📦 Manage Stock", "📤 Manage Files", "🔑 Manage Codes",
-        "📊 Recent Orders", "link", "file", "code", "Cancel"
-    ]
-    
-    if text in admin_buttons:
-        # These are handled by ConversationHandler, do nothing
-        return
     
     if text == s["menu_products"]:
         await show_products(update, context, lang)
