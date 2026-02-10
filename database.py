@@ -270,3 +270,45 @@ def delete_product(product_id):
 if __name__ == "__main__":
     init_db()
     seed_products()
+
+def get_product(product_id):
+    """Get a single product by ID."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM products WHERE product_id = ?', (product_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return dict(row)
+    return None
+
+def update_product_field(product_id, field, value):
+    """Update a single field of a product."""
+    conn = get_connection()
+    cursor = cursor.cursor()
+    query = f'UPDATE products SET {field} = ? WHERE product_id = ?'
+    cursor.execute(query, (value, product_id))
+    conn.commit()
+    conn.close()
+
+def count_available_codes(product_id):
+    """Count available (unused) codes for a product."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM codes WHERE product_id = ? AND is_used = 0', (product_id,))
+    count = cursor.fetchone()[0]
+    conn.close()
+    return count
+
+def get_recent_orders(limit=10):
+    """Get recent orders."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT * FROM orders 
+        ORDER BY created_at DESC 
+        LIMIT ?
+    ''', (limit,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]

@@ -338,6 +338,54 @@ def main() -> None:
     
     application.add_handler(add_product_handler)
 
+    # Edit Product ConversationHandler
+    edit_product_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^✏️ Edit Product$"), admin_handlers.start_edit_product)],
+        states={
+            admin_handlers.EDIT_SELECT_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.edit_product_selected)],
+            admin_handlers.EDIT_SELECT_FIELD: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.edit_field_selected)],
+            admin_handlers.EDIT_NEW_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.edit_new_value_received)],
+        },
+        fallbacks=[MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation)],
+    )
+    application.add_handler(edit_product_handler)
+
+    # Delete Product ConversationHandler
+    delete_product_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^🗑️ Delete Product$"), admin_handlers.start_delete_product)],
+        states={
+            admin_handlers.DELETE_SELECT_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.delete_product_selected)],
+            admin_handlers.DELETE_CONFIRM: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.delete_confirmed)],
+        },
+        fallbacks=[MessageHandler(filters.Regex("^(Cancel|❌ Cancel)$"), admin_handlers.cancel_conversation)],
+    )
+    application.add_handler(delete_product_handler)
+
+    # Manage Stock ConversationHandler
+    manage_stock_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^📦 Manage Stock$"), admin_handlers.start_manage_stock)],
+        states={
+            admin_handlers.STOCK_SELECT_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.stock_product_selected)],
+            admin_handlers.STOCK_NEW_VALUE: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.stock_new_value_received)],
+        },
+        fallbacks=[MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation)],
+    )
+    application.add_handler(manage_stock_handler)
+
+    # Manage Codes ConversationHandler
+    manage_codes_handler = ConversationHandler(
+        entry_points=[MessageHandler(filters.Regex("^🔑 Manage Codes$"), admin_handlers.start_manage_codes)],
+        states={
+            admin_handlers.CODES_SELECT_PRODUCT: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.codes_product_selected)],
+            admin_handlers.CODES_ADD_NEW: [MessageHandler(filters.TEXT & ~filters.COMMAND, admin_handlers.codes_add_new_received)],
+        },
+        fallbacks=[MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation)],
+    )
+    application.add_handler(manage_codes_handler)
+
+    # Recent Orders Handler
+    application.add_handler(MessageHandler(filters.Regex("^📊 Recent Orders$"), admin_handlers.show_recent_orders))
+
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("ad", admin_command))
     application.add_handler(CommandHandler("admin", admin_command))  # Alias for /ad

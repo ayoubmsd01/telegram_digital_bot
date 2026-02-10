@@ -12,9 +12,21 @@ from strings import STRINGS
 ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "").lower()
 
-# Conversation states
+# Conversation states for Add Product
 (CHOOSING_TYPE, TITLE_EN, TITLE_RU, DESC_EN, DESC_RU, 
  PRICE, STOCK, DELIVERY_VALUE, CODES_INPUT) = range(9)
+
+# Conversation states for Edit Product
+(EDIT_SELECT_PRODUCT, EDIT_SELECT_FIELD, EDIT_NEW_VALUE) = range(9, 12)
+
+# Conversation states for Delete Product
+(DELETE_SELECT_PRODUCT, DELETE_CONFIRM) = range(12, 14)
+
+# Conversation states for Manage Stock
+(STOCK_SELECT_PRODUCT, STOCK_NEW_VALUE) = range(14, 16)
+
+# Conversation states for Manage Codes
+(CODES_SELECT_PRODUCT, CODES_ADD_NEW) = range(16, 18)
 
 def is_admin(user) -> bool:
     """Check if user is admin by user_id or username."""
@@ -45,9 +57,10 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         await update.message.reply_text(s["not_authorized"])
         return
     
-    # Only show implemented features
     keyboard = [
-        ["➕ Add Product"],
+        ["➕ Add Product", "✏️ Edit Product"],
+        ["🗑️ Delete Product", "📦 Manage Stock"],
+        ["🔑 Manage Codes", "📊 Recent Orders"],
         ["⬅️ Back"]
     ]
     
@@ -55,6 +68,10 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         s["admin_menu"],
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
+
+# ============================================================================
+# ADD PRODUCT HANDLERS
+# ============================================================================
 
 async def start_add_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Start the add product conversation."""
@@ -66,7 +83,7 @@ async def start_add_product(update: Update, context: ContextTypes.DEFAULT_TYPE) 
         await update.message.reply_text(s["not_authorized"])
         return ConversationHandler.END
     
-    keyboard = [[" link"], ["file"], ["code"], ["Cancel"]]
+    keyboard = [["link"], ["file"], ["code"], ["Cancel"]]
     
     await update.message.reply_text(
         s["choose_product_type"],
@@ -168,12 +185,10 @@ async def delivery_value_received(update: Update, context: ContextTypes.DEFAULT_
     product_type = context.user_data['product_type']
     
     if product_type == "link":
-        # Save the URL
         context.user_data['delivery_value'] = update.message.text
         return await finalize_product(update, context)
         
     elif product_type == "file":
-        # Get file_id from the document/photo/video
         if update.message.document:
             file_id = update.message.document.file_id
         elif update.message.photo:
@@ -193,7 +208,7 @@ async def codes_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
     codes_list = [line.strip() for line in codes_text.split('\n') if line.strip()]
     
     context.user_data['codes'] = codes_list
-    context.user_data['delivery_value'] = ""  # Codes don't have a single delivery value
+    context.user_data['delivery_value'] = ""
     
     return await finalize_product(update, context)
 
@@ -203,7 +218,6 @@ async def finalize_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     s = STRINGS[lang]
     data = context.user_data
     
-    # Add product to database
     product_id = db.add_product(
         title_en=data['title_en'],
         title_ru=data['title_ru'],
@@ -215,7 +229,6 @@ async def finalize_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         delivery_value=data.get('delivery_value', '')
     )
     
-    # If type is code, add codes to codes table
     if data['product_type'] == 'code' and 'codes' in data:
         count = db.add_codes_bulk(product_id, data['codes'])
         await update.message.reply_text(
@@ -225,10 +238,306 @@ async def finalize_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     else:
         await update.message.reply_text(s["product_created"].format(product_id=product_id))
     
-    # Clear user data
     context.user_data.clear()
-    
     return ConversationHandler.END
+
+# ============================================================================
+# EDIT PRODUCT HANDLERS
+# ============================================================================
+
+async def start_edit_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show list of products to edit."""
+    lang = get_lang(update.effective_user.id)
+    s = STRINGS[lang]
+    
+    products = db.get_products()
+    if not products:
+        await update.message.reply_text("❌ No products found.")
+        return ConversationHandler.END
+    
+    message = "📝 Select product to edit (send Product ID):\n\n"
+    for p in products:
+        title = p[f'title_{lang}'] if lang in ['en', 'ru'] else p['title_en']
+        message += f"ID: {p['id']} - {title} (${p['price_usd']})\n"
+    
+    await update.message.reply_text(message)
+    return EDIT_SELECT_PRODUCT
+
+async def edit_product_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle product selection for editing."""
+    lang = get_lang(update.effective_user.id)
+    s = STRINGS[lang]
+    
+    try:
+        product_id = int(update.message.text)
+        product = db.get_product(product_id)
+        
+        if not product:
+            await update.message.reply_text("❌ Product not found.")
+            return ConversationHandler.END
+        
+        context.user_data['edit_product_id'] = product_id
+        
+        keyboard = [
+            ["Price"], ["Stock"], ["Title EN"], ["Title RU"],
+            ["Desc EN"], ["Desc RU"], ["Cancel"]
+        ]
+        
+        await update.message.reply_text(
+            f"Editing: {product['title_en']}\nSelect field to edit:",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+        )
+        return EDIT_SELECT_FIELD
+    except ValueError:
+        await update.message.reply_text("❌ Invalid ID.")
+        return EDIT_SELECT_PRODUCT
+
+async def edit_field_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle field selection."""
+    text = update.message.text
+    
+    if text == "Cancel":
+        await update.message.reply_text("❌ Operation canceled.", reply_markup=ReplyKeyboardRemove())
+        return ConversationHandler.END
+    
+    field_map = {
+        "Price": "price_usd",
+        "Stock": "stock",
+        "Title EN": "title_en",
+        "Title RU": "title_ru",
+        "Desc EN": "desc_en",
+        "Desc RU": "desc_ru"
+    }
+    
+    if text in field_map:
+        context.user_data['edit_field'] = field_map[text]
+        await update.message.reply_text(f"Enter new value for {text}:", reply_markup=ReplyKeyboardRemove())
+        return EDIT_NEW_VALUE
+    
+    await update.message.reply_text("❌ Invalid selection.")
+    return EDIT_SELECT_FIELD
+
+async def edit_new_value_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Update the product field."""
+    product_id = context.user_data['edit_product_id']
+    field = context.user_data['edit_field']
+    new_value = update.message.text
+    
+    # Convert to appropriate type
+    if field in ['price_usd']:
+        try:
+            new_value = float(new_value)
+        except ValueError:
+            await update.message.reply_text("❌ Invalid number.")
+            return EDIT_NEW_VALUE
+    elif field == 'stock':
+        try:
+            new_value = int(new_value)
+        except ValueError:
+            await update.message.reply_text("❌ Invalid number.")
+            return EDIT_NEW_VALUE
+    
+   # Update in database
+    db.update_product_field(product_id, field, new_value)
+    
+    await update.message.reply_text(f"✅ Product updated!\n{field} = {new_value}")
+    context.user_data.clear()
+    return ConversationHandler.END
+
+# ============================================================================
+# DELETE PRODUCT HANDLERS
+# ============================================================================
+
+async def start_delete_product(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show list of products to delete."""
+    lang = get_lang(update.effective_user.id)
+    
+    products = db.get_products()
+    if not products:
+        await update.message.reply_text("❌ No products found.")
+        return ConversationHandler.END
+    
+    message = "🗑️ Select product to DELETE (send Product ID):\n\n"
+    for p in products:
+        title = p[f'title_{lang}'] if lang in ['en', 'ru'] else p['title_en']
+        message += f"ID: {p['id']} - {title}\n"
+    
+    await update.message.reply_text(message)
+    return DELETE_SELECT_PRODUCT
+
+async def delete_product_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Confirm product deletion."""
+    lang = get_lang(update.effective_user.id)
+    
+    try:
+        product_id = int(update.message.text)
+        product = db.get_product(product_id)
+        
+        if not product:
+            await update.message.reply_text("❌ Product not found.")
+            return ConversationHandler.END
+        
+        context.user_data['delete_product_id'] = product_id
+        
+        keyboard = [["✅ YES, DELETE"], ["❌ Cancel"]]
+        await update.message.reply_text(
+            f"⚠️ Are you sure you want to delete:\n{product['title_en']}?",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+        )
+        return DELETE_CONFIRM
+    except ValueError:
+        await update.message.reply_text("❌ Invalid ID.")
+        return DELETE_SELECT_PRODUCT
+
+async def delete_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Execute product deletion."""
+    text = update.message.text
+    
+    if text == "✅ YES, DELETE":
+        product_id = context.user_data['delete_product_id']
+        db.delete_product(product_id)
+        await update.message.reply_text("✅ Product deleted!", reply_markup=ReplyKeyboardRemove())
+    else:
+        await update.message.reply_text("❌ Deletion canceled.", reply_markup=ReplyKeyboardRemove())
+    
+    context.user_data.clear()
+    return ConversationHandler.END
+
+# ============================================================================
+# MANAGE STOCK HANDLERS
+# ============================================================================
+
+async def start_manage_stock(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show list of products to manage stock."""
+    lang = get_lang(update.effective_user.id)
+    
+    products = db.get_products()
+    if not products:
+        await update.message.reply_text("❌ No products found.")
+        return ConversationHandler.END
+    
+    message = "📦 Select product to update stock (send Product ID):\n\n"
+    for p in products:
+        title = p[f'title_{lang}'] if lang in ['en', 'ru'] else p['title_en']
+        message += f"ID: {p['id']} - {title} (Stock: {p['stock']})\n"
+    
+    await update.message.reply_text(message)
+    return STOCK_SELECT_PRODUCT
+
+async def stock_product_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle product selection for stock update."""
+    try:
+        product_id = int(update.message.text)
+        product = db.get_product(product_id)
+        
+        if not product:
+            await update.message.reply_text("❌ Product not found.")
+            return ConversationHandler.END
+        
+        context.user_data['stock_product_id'] = product_id
+        await update.message.reply_text(
+            f"Current stock: {product['stock']}\nEnter new stock value:"
+        )
+        return STOCK_NEW_VALUE
+    except ValueError:
+        await update.message.reply_text("❌ Invalid ID.")
+        return STOCK_SELECT_PRODUCT
+
+async def stock_new_value_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Update product stock."""
+    try:
+        new_stock = int(update.message.text)
+        product_id = context.user_data['stock_product_id']
+        
+        db.update_product_field(product_id, 'stock', new_stock)
+        await update.message.reply_text(f"✅ Stock updated to {new_stock}!")
+        
+        context.user_data.clear()
+        return ConversationHandler.END
+    except ValueError:
+        await update.message.reply_text("❌ Invalid number.")
+        return STOCK_NEW_VALUE
+
+# ============================================================================
+# MANAGE CODES HANDLERS
+# ============================================================================
+
+async def start_manage_codes(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Show list of code-type products."""
+    lang = get_lang(update.effective_user.id)
+    
+    products = db.get_products()
+    code_products = [p for p in products if p['delivery_type'] == 'code']
+    
+    if not code_products:
+        await update.message.reply_text("❌ No code products found.")
+        return ConversationHandler.END
+    
+    message = "🔑 Select product to add codes (send Product ID):\n\n"
+    for p in code_products:
+        title = p[f'title_{lang}'] if lang in ['en', 'ru'] else p['title_en']
+        available = db.count_available_codes(p['id'])
+        message += f"ID: {p['id']} - {title} ({available} codes)\n"
+    
+    await update.message.reply_text(message)
+    return CODES_SELECT_PRODUCT
+
+async def codes_product_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle product selection for adding codes."""
+    try:
+        product_id = int(update.message.text)
+        product = db.get_product(product_id)
+        
+        if not product or product['delivery_type'] != 'code':
+            await update.message.reply_text("❌ Invalid code product.")
+            return ConversationHandler.END
+        
+        context.user_data['codes_product_id'] = product_id
+        await update.message.reply_text("Send new codes (one per line):")
+        return CODES_ADD_NEW
+    except ValueError:
+        await update.message.reply_text("❌ Invalid ID.")
+        return CODES_SELECT_PRODUCT
+
+async def codes_add_new_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Add new codes to product."""
+    codes_text = update.message.text
+    codes_list = [line.strip() for line in codes_text.split('\n') if line.strip()]
+    
+    product_id = context.user_data['codes_product_id']
+    count = db.add_codes_bulk(product_id, codes_list)
+    
+    await update.message.reply_text(f"✅ Added {count} codes!")
+    context.user_data.clear()
+    return ConversationHandler.END
+
+# ============================================================================
+# RECENT ORDERS HANDLER
+# ============================================================================
+
+async def show_recent_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show recent orders."""
+    lang = get_lang(update.effective_user.id)
+    
+    orders = db.get_recent_orders(limit=10)
+    
+    if not orders:
+        await update.message.reply_text("📊 No recent orders.")
+        return
+    
+    message = "📊 Recent Orders:\n\n"
+    for order in orders:
+        product = db.get_product(order['product_id'])
+        if product:
+            title = product[f'title_{lang}'] if lang in ['en', 'ru'] else product['title_en']
+            message += f"Order #{order['id']}: {title}\n"
+            message += f"Price: ${order['amount_usd']} | Status: {order['status']}\n\n"
+    
+    await update.message.reply_text(message)
+
+# ============================================================================
+# CANCEL HANDLER
+# ============================================================================
 
 async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Cancel the conversation."""
