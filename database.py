@@ -113,15 +113,8 @@ def get_products():
     cursor.execute('SELECT * FROM products')
     rows = cursor.fetchall()
     conn.close()
-    return rows
+    return [dict(row) for row in rows]
 
-def get_product(product_id):
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM products WHERE product_id = ?', (product_id,))
-    row = cursor.fetchone()
-    conn.close()
-    return row
 
 def create_order(user_id, product_id, invoice_id):
     conn = get_connection()

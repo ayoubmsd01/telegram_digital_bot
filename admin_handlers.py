@@ -258,7 +258,7 @@ async def start_edit_product(update: Update, context: ContextTypes.DEFAULT_TYPE)
     message = "📝 Select product to edit (send Product ID):\n\n"
     for p in products:
         title = p[f'title_{lang}'] if lang in ['en', 'ru'] else p['title_en']
-        message += f"ID: {p['id']} - {title} (${p['price_usd']})\n"
+        message += f"ID: {p['product_id']} - {title} (${p['price_usd']})\n"
     
     await update.message.reply_text(message)
     return EDIT_SELECT_PRODUCT
@@ -360,7 +360,7 @@ async def start_delete_product(update: Update, context: ContextTypes.DEFAULT_TYP
     message = "🗑️ Select product to DELETE (send Product ID):\n\n"
     for p in products:
         title = p[f'title_{lang}'] if lang in ['en', 'ru'] else p['title_en']
-        message += f"ID: {p['id']} - {title}\n"
+        message += f"ID: {p['product_id']} - {title}\n"
     
     await update.message.reply_text(message)
     return DELETE_SELECT_PRODUCT
@@ -419,7 +419,7 @@ async def start_manage_stock(update: Update, context: ContextTypes.DEFAULT_TYPE)
     message = "📦 Select product to update stock (send Product ID):\n\n"
     for p in products:
         title = p[f'title_{lang}'] if lang in ['en', 'ru'] else p['title_en']
-        message += f"ID: {p['id']} - {title} (Stock: {p['stock']})\n"
+        message += f"ID: {p['product_id']} - {title} (Stock: {p['stock']})\n"
     
     await update.message.reply_text(message)
     return STOCK_SELECT_PRODUCT
@@ -476,8 +476,8 @@ async def start_manage_codes(update: Update, context: ContextTypes.DEFAULT_TYPE)
     message = "🔑 Select product to add codes (send Product ID):\n\n"
     for p in code_products:
         title = p[f'title_{lang}'] if lang in ['en', 'ru'] else p['title_en']
-        available = db.count_available_codes(p['id'])
-        message += f"ID: {p['id']} - {title} ({available} codes)\n"
+        available = db.count_available_codes(p['product_id'])
+        message += f"ID: {p['product_id']} - {title} ({available} codes)\n"
     
     await update.message.reply_text(message)
     return CODES_SELECT_PRODUCT
