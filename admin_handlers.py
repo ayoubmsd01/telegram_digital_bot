@@ -26,10 +26,10 @@ ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "").lower()
 (DELETE_SELECT_PRODUCT, DELETE_CONFIRM) = range(12, 14)
 
 # Conversation states for Manage Stock
-(STOCK_SELECT_PRODUCT, STOCK_NEW_VALUE) = range(14, 16)
+(STOCK_SELECT_PRODUCT, STOCK_ENTER_QTY, STOCK_ENTER_CODES) = range(14, 17)
 
 # Conversation states for Manage Codes
-(CODES_SELECT_PRODUCT, CODES_ADD_NEW) = range(16, 18)
+(CODES_SELECT_PRODUCT, CODES_ADD_NEW) = range(17, 19)
 
 def is_admin(user) -> bool:
     """Check if user is admin by user_id or username."""
@@ -477,25 +477,34 @@ async def admin_delete_confirm_callback(update: Update, context: ContextTypes.DE
 
 async def start_manage_stock(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Show list of products to manage stock."""
-    lang = get_lang(update.effective_user.id)
+    user = update.effective_user
+    print(f"[ADMIN STOCK] step=start user_id={user.id}")
+    
+    lang = get_lang(user.id)
     
     products = db.get_products()
     if not products:
         await update.message.reply_text("❌ No products found.")
         return ConversationHandler.END
     
-    message = "📦 Select product to update stock (send Product ID):\n\n"
+    message = "📦 Select product to ADD STOCK (send Product ID):\n\n"
     for p in products:
         title = p[f'title_{lang}'] if lang in ['en', 'ru'] else p['title_en']
-        message += f"ID: {p['product_id']} - {title} (Stock: {p['stock']})\n"
+        message += f"ID: {p['product_id']} - {title} (Current: {p['stock']})\n"
     
     await update.message.reply_text(message)
     return STOCK_SELECT_PRODUCT
 
 async def stock_product_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle product selection for stock update."""
+    text = update.message.text
+    if is_command_button(text):
+        await update.message.reply_text("⚠️ Operation cancelled.", reply_markup=ReplyKeyboardRemove())
+        context.user_data.clear()
+        return ConversationHandler.END
+
     try:
-        product_id = int(update.message.text)
+        product_id = int(text)
         product = db.get_product(product_id)
         
         if not product:
@@ -503,40 +512,107 @@ async def stock_product_selected(update: Update, context: ContextTypes.DEFAULT_T
             return ConversationHandler.END
         
         context.user_data['stock_product_id'] = product_id
+        context.user_data['stock_delivery_type'] = product['delivery_type']
+        
+        print(f"[ADMIN STOCK] step=choose_product product_id={product_id} type={product['delivery_type']}")
+        
         await update.message.reply_text(
-            f"Current stock: {product['stock']}\nEnter new stock value:"
+            f"📦 Selected: {product['title_en']}\n"
+            f"Current Stock: {product['stock']}\n\n"
+            "Enter quantity to ADD (e.g. 5):"
         )
-        return STOCK_NEW_VALUE
+        return STOCK_ENTER_QTY
     except ValueError:
         await update.message.reply_text("❌ Invalid ID.")
         return STOCK_SELECT_PRODUCT
 
-async def stock_new_value_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Update product stock."""
+async def stock_qty_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle quantity input."""
     if 'stock_product_id' not in context.user_data:
         await update.message.reply_text("❌ Session expired. Please start again.")
         return ConversationHandler.END
     
     text = update.message.text
     if is_command_button(text):
-        await update.message.reply_text("⚠️ Operation cancelled. Select the command again.", reply_markup=ReplyKeyboardRemove())
+        await update.message.reply_text("⚠️ Operation cancelled.", reply_markup=ReplyKeyboardRemove())
         context.user_data.clear()
         return ConversationHandler.END
-
+        
     try:
-        text = text.strip().replace(',', '.')
-        new_stock = int(float(text))
+        qty = int(text)
+        if qty <= 0:
+            await update.message.reply_text("❌ Quantity must be positive.")
+            return STOCK_ENTER_QTY
+            
         product_id = context.user_data['stock_product_id']
+        delivery_type = context.user_data['stock_delivery_type']
         
-        db.update_product_field(product_id, 'stock', new_stock)
-        await update.message.reply_text(f"✅ Stock updated to {new_stock}!")
+        print(f"[ADMIN STOCK] step=enter_qty qty={qty} product_id={product_id}")
         
+        # If Link or File -> Update immediately
+        if delivery_type in ['link', 'file']:
+            db.increment_stock(product_id, qty)
+            await update.message.reply_text(f"✅ Stock updated successfully (+{qty})!")
+            context.user_data.clear()
+            return ConversationHandler.END
+            
+        # If Code -> Ask for codes
+        elif delivery_type == 'code':
+            context.user_data['stock_add_qty'] = qty
+            await update.message.reply_text(
+                f"🔑 delivery_type='code'.\n"
+                f"Please send {qty} codes (one per line):"
+            )
+            return STOCK_ENTER_CODES
+        
+        # Unknown type fallback
+        else:
+            db.increment_stock(product_id, qty)
+            await update.message.reply_text(f"✅ Stock updated successfully (+{qty})!")
+            context.user_data.clear()
+            return ConversationHandler.END
+            
+    except ValueError:
+        await update.message.reply_text("❌ Invalid number. Please enter an integer.")
+        return STOCK_ENTER_QTY
+
+async def stock_codes_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle codes input."""
+    if 'stock_product_id' not in context.user_data:
+        await update.message.reply_text("❌ Session expired.")
+        return ConversationHandler.END
+        
+    text = update.message.text
+    if is_command_button(text):
+        await update.message.reply_text("⚠️ Operation cancelled.", reply_markup=ReplyKeyboardRemove())
         context.user_data.clear()
         return ConversationHandler.END
-    except ValueError:
-        await update.message.reply_text(f"❌ Invalid number: '{update.message.text}'. Please enter a valid integer.")
-        return STOCK_NEW_VALUE
-        return STOCK_NEW_VALUE
+        
+    codes = [line.strip() for line in text.split('\n') if line.strip()]
+    expected_qty = context.user_data['stock_add_qty']
+    product_id = context.user_data['stock_product_id']
+    
+    print(f"[ADMIN STOCK] step=enter_codes count={len(codes)} expected={expected_qty}")
+    
+    if len(codes) != expected_qty:
+        await update.message.reply_text(
+            f"❌ You sent {len(codes)} codes, but I expected {expected_qty}.\n"
+            "Please send exactly the right amount, or Cancel."
+        )
+        return STOCK_ENTER_CODES
+        
+    # Save codes and update stock
+    try:
+        db.add_codes_bulk(product_id, codes)
+        db.increment_stock(product_id, expected_qty)
+        
+        await update.message.reply_text(f"✅ Added {len(codes)} codes and updated stock!")
+    except Exception as e:
+        print(f"Error adding codes: {e}")
+        await update.message.reply_text(f"❌ Error: {str(e)}")
+        
+    context.user_data.clear()
+    return ConversationHandler.END
 
 # ============================================================================
 # MANAGE CODES HANDLERS

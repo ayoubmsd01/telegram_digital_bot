@@ -357,7 +357,8 @@ def main() -> None:
         entry_points=[MessageHandler(filters.Regex("^📦 Manage Stock$"), admin_handlers.start_manage_stock)],
         states={
             admin_handlers.STOCK_SELECT_PRODUCT: [MessageHandler(filters.TEXT, admin_handlers.stock_product_selected)],
-            admin_handlers.STOCK_NEW_VALUE: [MessageHandler(filters.TEXT, admin_handlers.stock_new_value_received)],
+            admin_handlers.STOCK_ENTER_QTY: [MessageHandler(filters.TEXT, admin_handlers.stock_qty_received)],
+            admin_handlers.STOCK_ENTER_CODES: [MessageHandler(filters.TEXT, admin_handlers.stock_codes_received)],
         },
         fallbacks=[MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation)],
     )

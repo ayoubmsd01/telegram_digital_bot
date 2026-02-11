@@ -276,10 +276,18 @@ def get_product(product_id):
         return dict(row)
     return None
 
+def increment_stock(product_id, qty):
+    """Increment product stock by qty."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE products SET stock = stock + ? WHERE product_id = ?', (qty, product_id))
+    conn.commit()
+    conn.close()
+
 def update_product_field(product_id, field, value):
     """Update a single field of a product."""
     conn = get_connection()
-    cursor = cursor.cursor()
+    cursor = conn.cursor()
     query = f'UPDATE products SET {field} = ? WHERE product_id = ?'
     cursor.execute(query, (value, product_id))
     conn.commit()
