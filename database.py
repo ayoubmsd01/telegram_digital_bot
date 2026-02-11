@@ -294,13 +294,17 @@ def count_available_codes(product_id):
     conn.close()
     return count
 
-def get_recent_orders(limit=10):
-    """Get recent orders."""
+def get_recent_orders(limit=20):
+    """Get recent orders with product details."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('''
-        SELECT * FROM orders 
-        ORDER BY created_at DESC 
+    cursor.execute(f'''
+        SELECT 
+            o.order_id, o.user_id, o.status, o.created_at, o.invoice_id,
+            p.title_en, p.price_usd, p.product_id
+        FROM orders o
+        LEFT JOIN products p ON o.product_id = p.product_id
+        ORDER BY o.order_id DESC
         LIMIT ?
     ''', (limit,))
     rows = cursor.fetchall()

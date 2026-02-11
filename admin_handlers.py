@@ -2,6 +2,9 @@
 Admin Panel Handlers for Telegram Digital Bot
 Handles all admin-only operations including product management.
 """
+import datetime
+import traceback
+
 import os
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
 from telegram.ext import ContextTypes, ConversationHandler
@@ -598,23 +601,60 @@ async def codes_add_new_received(update: Update, context: ContextTypes.DEFAULT_T
 
 async def show_recent_orders(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Show recent orders."""
-    lang = get_lang(update.effective_user.id)
+    user = update.effective_user
+    print(f"[ADMIN] recent_orders clicked by user_id={user.id}")
     
-    orders = db.get_recent_orders(limit=10)
-    
-    if not orders:
-        await update.message.reply_text("📊 No recent orders.")
+    # Permission check for extra safety
+    if not is_admin(user):
+        await update.message.reply_text("❌ Not authorized.")
         return
-    
-    message = "📊 Recent Orders:\n\n"
-    for order in orders:
-        product = db.get_product(order['product_id'])
-        if product:
-            title = product[f'title_{lang}'] if lang in ['en', 'ru'] else product['title_en']
-            message += f"Order #{order['id']}: {title}\n"
-            message += f"Price: ${order['amount_usd']} | Status: {order['status']}\n\n"
-    
-    await update.message.reply_text(message)
+        
+    try:
+        # Get orders (limit 20) with joined data
+        orders = db.get_recent_orders(limit=20)
+        
+        if not orders:
+            await update.message.reply_text("📊 No recent orders found.")
+            return
+        
+        message = "📊 Recent Orders (Last 20 ordered):\n\n"
+        
+        for o in orders:
+            # Safely get values
+            order_id = o.get('order_id', 'N/A')
+            status = o.get('status', 'unknown')
+            title = o.get('title_en') or "Deleted Product"
+            price = o.get('price_usd') or 0.0
+            user_id = str(o.get('user_id', 'N/A'))
+            # Format time if possible
+            created_at = str(o.get('created_at', ''))[:16] # Cut seconds
+            
+            # Status icon
+            if status == 'paid':
+                icon = "✅"
+            elif status == 'pending':
+                icon = "⏳"
+            else:
+                icon = "❌"
+            
+            # Line 1: ID | Title | Status
+            message += f"#{order_id} | {title} | {icon} {status.upper()}\n"
+            # Line 2: User | Price | Time
+            message += f"User: <code>{user_id}</code> | ${price} | {created_at}\n"
+            message += "-------------------\n"
+            
+        # Send message (split if too long)
+        if len(message) > 4000:
+            chunks = [message[i:i+4000] for i in range(0, len(message), 4000)]
+            for chunk in chunks:
+                await update.message.reply_text(chunk, parse_mode='HTML')
+        else:
+            await update.message.reply_text(message, parse_mode='HTML')
+            
+    except Exception as e:
+        error_msg = f"Error in recent_orders: {str(e)}\n{traceback.format_exc()}"
+        print(error_msg)
+        await update.message.reply_text(f"❌ Error fetching orders: {str(e)}")
 
 # ============================================================================
 # CANCEL HANDLER
