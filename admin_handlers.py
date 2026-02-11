@@ -402,11 +402,15 @@ async def start_delete_product(update: Update, context: ContextTypes.DEFAULT_TYP
     return DELETE_SELECT_PRODUCT
 
 async def delete_product_selected(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Confirm product deletion."""
-    lang = get_lang(update.effective_user.id)
-    
+    """Confirm product deletion with Inline Buttons."""
+    text = update.message.text
+    if is_command_button(text):
+        await update.message.reply_text("⚠️ Operation cancelled.", reply_markup=ReplyKeyboardRemove())
+        context.user_data.clear()
+        return ConversationHandler.END
+
     try:
-        product_id = int(update.message.text)
+        product_id = int(text)
         product = db.get_product(product_id)
         
         if not product:
@@ -415,31 +419,53 @@ async def delete_product_selected(update: Update, context: ContextTypes.DEFAULT_
         
         context.user_data['delete_product_id'] = product_id
         
-        keyboard = [["✅ YES, DELETE"], ["❌ Cancel"]]
+        keyboard = [
+            [
+                InlineKeyboardButton("✅ YES", callback_data="admin_del_yes"),
+                InlineKeyboardButton("❌ NO", callback_data="admin_del_no")
+            ]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
         await update.message.reply_text(
-            f"⚠️ Are you sure you want to delete:\n{product['title_en']}?",
-            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+            f"⚠️ Are you sure you want to delete:\n<b>{product['title_en']}</b>?\n(ID: {product_id})",
+            reply_markup=reply_markup,
+            parse_mode='HTML'
         )
         return DELETE_CONFIRM
     except ValueError:
         await update.message.reply_text("❌ Invalid ID.")
         return DELETE_SELECT_PRODUCT
 
-async def delete_confirmed(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """Execute product deletion."""
-    text = update.message.text
+async def admin_delete_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """Handle delete confirmation via callback."""
+    query = update.callback_query
+    await query.answer()
     
-    if text == "✅ YES, DELETE":
+    choice = query.data
+    
+    if choice == "admin_del_yes":
         if 'delete_product_id' not in context.user_data:
-            await update.message.reply_text("❌ Session expired. Please start again.", reply_markup=ReplyKeyboardRemove())
+            await query.edit_message_text("❌ Session expired. Please start again.")
             return ConversationHandler.END
+            
         product_id = context.user_data['delete_product_id']
-        db.delete_product(product_id)
-        await update.message.reply_text("✅ Product deleted!", reply_markup=ReplyKeyboardRemove())
+        
+        # Log deletion
+        print(f"[ADMIN DELETE] product_id={product_id} deleted_by={update.effective_user.id}")
+        
+        # Execute deletion
+        try:
+            db.delete_product(product_id)
+            await query.edit_message_text(f"✅ Product (ID: {product_id}) deleted successfully!")
+        except Exception as e:
+            print(f"Error deleting product: {e}")
+            await query.edit_message_text(f"❌ Error deleting product: {str(e)}")
+            
     else:
-        await update.message.reply_text("❌ Deletion canceled.", reply_markup=ReplyKeyboardRemove())
+        await query.edit_message_text("❌ Deletion canceled.")
     
-    context.user_data.clear()
+    context.user_data.pop('delete_product_id', None)
     return ConversationHandler.END
 
 # ============================================================================

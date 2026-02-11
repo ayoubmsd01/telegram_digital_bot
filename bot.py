@@ -345,7 +345,7 @@ def main() -> None:
         entry_points=[MessageHandler(filters.Regex("^🗑️ Delete Product$"), admin_handlers.start_delete_product)],
         states={
             admin_handlers.DELETE_SELECT_PRODUCT: [MessageHandler(filters.TEXT, admin_handlers.delete_product_selected)],
-            admin_handlers.DELETE_CONFIRM: [MessageHandler(filters.TEXT, admin_handlers.delete_confirmed)],
+            admin_handlers.DELETE_CONFIRM: [CallbackQueryHandler(admin_handlers.admin_delete_confirm_callback, pattern="^admin_del_")],
         },
         fallbacks=[MessageHandler(filters.Regex("^(Cancel|❌ Cancel)$"), admin_handlers.cancel_conversation)],
     )
