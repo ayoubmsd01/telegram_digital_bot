@@ -72,3 +72,26 @@ def delete_invoice(invoice_id: int):
     data = {"invoice_id": invoice_id}
     response = requests.post(url, json=data, headers=get_headers())
     return response.json()
+
+def get_invoices(invoice_ids=None, status=None, limit=100, offset=0):
+    """
+    Get invoices of your app.
+    invoice_ids: list or comma-separated string of IDs
+    """
+    url = f"{BASE_URL}/getInvoices"
+    params = {}
+    if invoice_ids:
+        if isinstance(invoice_ids, list):
+            params["invoice_ids"] = ",".join(map(str, invoice_ids))
+        else:
+            params["invoice_ids"] = str(invoice_ids)
+            
+    if status:
+        params["status"] = status
+        
+    params["count"] = limit
+    params["offset"] = offset
+        
+    response = requests.get(url, params=params, headers=get_headers())
+    print(f"Get Invoices Response: {response.text}")
+    return response.json()

@@ -10,6 +10,7 @@ import strings
 from crypto_pay import create_invoice
 import admin_handlers
 
+import delivery_service
 ADMIN_USER_ID = int(os.getenv("ADMIN_USER_ID", "0"))
 ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "").lower()
 
@@ -215,8 +216,10 @@ async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                     f"✅ Оплатите по ссылке ниже:"
                 )
                 
+                check_btn_text = "✅ Check Payment" if lang != "ru" else "✅ Проверить оплату"
                 keyboard = [
                     [InlineKeyboardButton(s["pay_link"], url=pay_url)],
+                    [InlineKeyboardButton(check_btn_text, callback_data=f"checkpay:{order_id}")],
                     [InlineKeyboardButton("❌ Cancel Order / Отменить", callback_data=f"cancel_{order_id}_{invoice_id}")]
                 ]
                 await query.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
@@ -285,6 +288,66 @@ async def check_expirations(context: ContextTypes.DEFAULT_TYPE):
                 delete_invoice(invoice_id)
             except:
                 pass
+
+async def check_pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+
+    data = query.data
+    try:
+        order_id = int(data.split(":")[1])
+    except ValueError:
+        return
+
+    order = db.get_order(order_id)
+    if not order:
+        await query.message.reply_text("❌ Order not found.")
+        return
+
+    if order['status'] == 'paid' or order['status'] == 'delivered':
+        await delivery_service.deliver_order(order_id, context.bot)
+        await query.message.reply_text("✅ Payment already confirmed! Check your messages.")
+        return
+
+    if order['status'] == 'canceled':
+        await query.message.reply_text("❌ Order was canceled.")
+        return
+
+    # Check via CryptoPay API
+    invoice_id = order['invoice_id']
+    from crypto_pay import get_invoices
+    
+    try:
+        print(f"Checking invoice {invoice_id} via API...")
+        result = get_invoices(invoice_ids=invoice_id)
+        
+        is_paid = False
+        if result and result.get('ok'):
+            items = result['result'].get('items', [])
+            if items:
+                status = items[0]['status']
+                print(f"Invoice {invoice_id} status: {status}")
+                if status == 'paid':
+                    is_paid = True
+        
+        if is_paid:
+            if order['status'] == 'pending':
+                db.update_order_status(order_id, 'paid')
+                
+            success = await delivery_service.deliver_order(order_id, context.bot)
+            if success:
+                # Edit original message to remove buttons ideally, but replying is safer
+                await query.message.reply_text("✅ Payment confirmed! Delivering...")
+            else:
+                await query.message.reply_text("✅ Payment confirmed, but delivery failed. Contact support.")
+        else:
+            lang = db.get_user_language(order['user_id']) or "en"
+            msg = "⏳ Payment not received yet. Please try again." if lang != 'ru' else "⏳ Оплата ещё не поступила. Попробуйте позже."
+            await query.message.reply_text(msg)
+            
+    except Exception as e:
+        print(f"Check payment exception: {e}")
+        await query.message.reply_text("❌ Error checking payment status.")
 
 async def post_init(application: Application) -> None:
     # Use create_task on the loop
@@ -384,6 +447,7 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(language_callback, pattern="^lang_"))
     application.add_handler(CallbackQueryHandler(product_callback, pattern="^(prod_|buy_|back_to_products)"))
     application.add_handler(CallbackQueryHandler(cancel_order_callback, pattern="^cancel_"))
+    application.add_handler(CallbackQueryHandler(check_pay_callback, pattern="^checkpay:"))
     
     application.add_handler(MessageHandler(filters.TEXT, menu_handler))
 

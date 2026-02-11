@@ -318,3 +318,22 @@ def get_recent_orders(limit=20):
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]
+
+def get_order(order_id):
+    """Get single order by ID."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM orders WHERE order_id = ?', (order_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        return dict(row)
+    return None
+
+def update_order_status(order_id, status):
+    """Update status of an order."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE orders SET status = ? WHERE order_id = ?', (status, order_id))
+    conn.commit()
+    conn.close()
