@@ -361,6 +361,16 @@ async def background_expiration_loop():
             print(f"Expiration task error: {e}")
         await asyncio.sleep(60)
 
+async def command_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    """End conversation and handle command."""
+    context.user_data.clear()
+    cmd = update.message.text
+    if cmd == '/start':
+        await start(update, context)
+    elif cmd in ['/admin', '/ad']:
+        await admin_handlers.admin_panel(update, context)
+    return ConversationHandler.END
+
 def main() -> None:
     """Run the bot."""
     if not BOT_TOKEN:
@@ -387,7 +397,10 @@ def main() -> None:
             ],
             admin_handlers.CODES_INPUT: [MessageHandler(filters.TEXT, admin_handlers.codes_received)],
         },
-        fallbacks=[MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation)],
+        fallbacks=[
+            MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation),
+            CommandHandler(["start", "admin", "ad"], command_fallback)
+        ],
     )
     
     application.add_handler(add_product_handler)
@@ -400,7 +413,10 @@ def main() -> None:
             admin_handlers.EDIT_SELECT_FIELD: [MessageHandler(filters.TEXT, admin_handlers.edit_field_selected)],
             admin_handlers.EDIT_NEW_VALUE: [MessageHandler(filters.TEXT, admin_handlers.edit_new_value_received)],
         },
-        fallbacks=[MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation)],
+        fallbacks=[
+            MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation),
+            CommandHandler(["start", "admin", "ad"], command_fallback)
+        ],
     )
     application.add_handler(edit_product_handler)
 
@@ -411,7 +427,10 @@ def main() -> None:
             admin_handlers.DELETE_SELECT_PRODUCT: [MessageHandler(filters.TEXT, admin_handlers.delete_product_selected)],
             admin_handlers.DELETE_CONFIRM: [CallbackQueryHandler(admin_handlers.admin_delete_confirm_callback, pattern="^admin_del_")],
         },
-        fallbacks=[MessageHandler(filters.Regex("^(Cancel|❌ Cancel)$"), admin_handlers.cancel_conversation)],
+        fallbacks=[
+            MessageHandler(filters.Regex("^(Cancel|❌ Cancel)$"), admin_handlers.cancel_conversation),
+            CommandHandler(["start", "admin", "ad"], command_fallback)
+        ],
     )
     application.add_handler(delete_product_handler)
 
@@ -423,7 +442,10 @@ def main() -> None:
             admin_handlers.STOCK_ENTER_QTY: [MessageHandler(filters.TEXT, admin_handlers.stock_qty_received)],
             admin_handlers.STOCK_ENTER_CODES: [MessageHandler(filters.TEXT, admin_handlers.stock_codes_received)],
         },
-        fallbacks=[MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation)],
+        fallbacks=[
+            MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation),
+            CommandHandler(["start", "admin", "ad"], command_fallback)
+        ],
     )
     application.add_handler(manage_stock_handler)
 
@@ -434,7 +456,10 @@ def main() -> None:
             admin_handlers.CODES_SELECT_PRODUCT: [MessageHandler(filters.TEXT, admin_handlers.codes_product_selected)],
             admin_handlers.CODES_ADD_NEW: [MessageHandler(filters.TEXT, admin_handlers.codes_add_new_received)],
         },
-        fallbacks=[MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation)],
+        fallbacks=[
+            MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation),
+            CommandHandler(["start", "admin", "ad"], command_fallback)
+        ],
     )
     application.add_handler(manage_codes_handler)
 
