@@ -91,6 +91,7 @@ def init_db():
     
     conn.commit()
     conn.close()
+    print("Database tables initialized successfully.")
 
 def add_user(user_id, language):
     conn = get_connection()

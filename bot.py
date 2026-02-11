@@ -304,6 +304,7 @@ def main() -> None:
         print("Error: TELEGRAM_BOT_TOKEN not found in .env")
         return
         
+    db.init_db()
     application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
 
     # Add Product ConversationHandler
