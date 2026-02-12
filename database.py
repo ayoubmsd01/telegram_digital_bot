@@ -89,6 +89,25 @@ def init_db():
         )
     ''')
     
+    # Migrations: Add new columns to orders table safely
+    columns_to_add = [
+        ("price_usd", "REAL"),
+        ("paid_amount", "TEXT"),
+        ("paid_asset", "TEXT"),
+        ("paid_at", "TEXT"),
+        ("delivered_type", "TEXT"),
+        ("delivered_value", "TEXT"),
+        ("delivered_filename", "TEXT"),
+        ("delivered_at", "TEXT")
+    ]
+    
+    for col_name, col_type in columns_to_add:
+        try:
+            c.execute(f"ALTER TABLE orders ADD COLUMN {col_name} {col_type}")
+        except sqlite3.OperationalError:
+            # Column likely already exists
+            pass
+    
     conn.commit()
     conn.close()
     print("Database tables initialized successfully.")
@@ -117,15 +136,37 @@ def get_products():
     return [dict(row) for row in rows]
 
 
-def create_order(user_id, product_id, invoice_id):
+def create_order(user_id, product_id, invoice_id, price_usd=0.0):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('INSERT INTO orders (user_id, product_id, invoice_id, status) VALUES (?, ?, ?, ?)',
-                   (user_id, product_id, invoice_id, 'pending'))
+    cursor.execute('INSERT INTO orders (user_id, product_id, invoice_id, price_usd, status) VALUES (?, ?, ?, ?, ?)',
+                   (user_id, product_id, invoice_id, price_usd, 'pending'))
     order_id = cursor.lastrowid
     conn.commit()
     conn.close()
     return order_id
+
+def update_order_delivery(order_id, type, value, filename, timestamp):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE orders 
+        SET delivered_type = ?, delivered_value = ?, delivered_filename = ?, delivered_at = ? 
+        WHERE order_id = ?
+    ''', (type, value, filename, timestamp, order_id))
+    conn.commit()
+    conn.close()
+
+def update_order_payment(order_id, amount, asset, timestamp):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        UPDATE orders 
+        SET paid_amount = ?, paid_asset = ?, paid_at = ?
+        WHERE order_id = ?
+    ''', (amount, asset, timestamp, order_id))
+    conn.commit()
+    conn.close()
 
 def get_order_by_invoice(invoice_id):
     conn = get_connection()

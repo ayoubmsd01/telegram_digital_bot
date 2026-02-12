@@ -696,27 +696,51 @@ async def show_recent_orders(update: Update, context: ContextTypes.DEFAULT_TYPE)
         message = "📊 Recent Orders (Last 20 ordered):\n\n"
         
         for o in orders:
-            # Safely get values
             order_id = o.get('order_id', 'N/A')
             status = o.get('status', 'unknown')
             title = o.get('title_en') or "Deleted Product"
             price = o.get('price_usd') or 0.0
+            price_str = f"${price}" if price else "$0.0"
+            
             user_id = str(o.get('user_id', 'N/A'))
-            # Format time if possible
-            created_at = str(o.get('created_at', ''))[:16] # Cut seconds
+            created_at = str(o.get('created_at', ''))[:16]
             
-            # Status icon
-            if status == 'paid':
-                icon = "✅"
-            elif status == 'pending':
-                icon = "⏳"
-            else:
-                icon = "❌"
+            # Payment Details
+            paid_amount = o.get('paid_amount')
+            paid_asset = o.get('paid_asset') or ""
+            invoice_id = o.get('invoice_id')
             
-            # Line 1: ID | Title | Status
-            message += f"#{order_id} | {title} | {icon} {status.upper()}\n"
-            # Line 2: User | Price | Time
-            message += f"User: <code>{user_id}</code> | ${price} | {created_at}\n"
+            if status == 'delivered': status_text = "✅ DELIVERED"
+            elif status == 'paid': status_text = "✅ PAID"
+            elif status == 'pending': status_text = "⏳ AWAITING PAYMENT"
+            elif status in ['canceled', 'expired']: status_text = "❌"
+            else: status_text = f"❓ {status.upper()}"
+            
+            message += f"#{order_id} | {title} | {status_text}\n"
+            
+            # Payment line
+            pay_details = f"User: <code>{user_id}</code> | Price: {price_str}"
+            if paid_amount:
+                pay_details += f" | Paid: {paid_amount} {paid_asset}"
+            pay_details += f" | Invoice: {invoice_id} | {created_at}"
+            message += f"{pay_details}\n"
+            
+            # Delivery details
+            if status == 'delivered':
+                 dtype = o.get('delivered_type')
+                 dvalue = o.get('delivered_value')
+                 dname = o.get('delivered_filename')
+                 dat = o.get('delivered_at')
+                 
+                 if dtype == 'file':
+                     message += f"Delivered: FILE | Name: {dname or 'N/A'} | Time: {dat}\n"
+                 elif dtype == 'link':
+                     short_v = (dvalue[:25] + '...') if dvalue and len(dvalue) > 25 else dvalue
+                     message += f"Delivered: LINK | {short_v} | Time: {dat}\n"
+                 elif dtype == 'code':
+                     short_c = (dvalue[-5:] if dvalue and len(dvalue) > 5 else dvalue)
+                     message += f"Delivered: CODE | ...{short_c} | Time: {dat}\n"
+            
             message += "-------------------\n"
             
         # Send message (split if too long)

@@ -91,8 +91,13 @@ async def crypto_webhook(secret_path: str, request: Request):
         # Mark as paid if not
         if order["status"] != "delivered":
              if order["status"] != "paid":
+                 paid_asset = payload.get("asset")
+                 paid_amount = payload.get("amount")
+                 paid_at = payload.get("paid_at")
+                 
                  db.update_order_status(order_id, "paid")
-                 logger.info(f"[WEBHOOK] Order {order_id} updated to PAID")
+                 db.update_order_payment(order_id, paid_amount, paid_asset, paid_at)
+                 logger.info(f"[WEBHOOK] Order {order_id} updated to PAID ({paid_amount} {paid_asset})")
 
              # Deliver
              success = await delivery_service.deliver_order(order_id, bot)

@@ -1,5 +1,6 @@
 import database as db
 import logging
+from datetime import datetime
 
 logger = logging.getLogger(__name__)
 
@@ -51,12 +52,16 @@ async def deliver_order(order_id: int, bot):
         print(f"[DELIVERY] Failed to send header: {e}")
 
     try:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
         # 2. Perform Delivery
         if delivery_type == 'link':
             await bot.send_message(chat_id=user_id, text=f"{msg_done}\n🔗 {value}")
+            db.update_order_delivery(order_id, 'link', value, None, now_str)
             
         elif delivery_type == 'file':
             await bot.send_document(chat_id=user_id, document=value, caption=msg_done)
+            db.update_order_delivery(order_id, 'file', value, title, now_str)
             
         elif delivery_type == 'code':
             code_row = db.get_unused_code(product_id)
@@ -73,6 +78,7 @@ async def deliver_order(order_id: int, bot):
                     text=f"{msg_done}\n\n<code>{code_text}</code>", 
                     parse_mode='HTML'
                 )
+                db.update_order_delivery(order_id, 'code', code_text, None, now_str)
             else:
                 await bot.send_message(chat_id=user_id, text=msg_no_code)
                 print(f"[DELIVERY] No codes for product {product_id}")

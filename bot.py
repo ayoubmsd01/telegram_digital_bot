@@ -200,7 +200,7 @@ async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 pay_url = result["pay_url"] # Or bot_invoice_url
                 
                 # Create Order in DB
-                order_id = db.create_order(user_id, p_id, invoice_id)
+                order_id = db.create_order(user_id, p_id, invoice_id, product["price_usd"])
                 
                 msg_text = (
                     f"🧾 <b>Invocie #{invoice_id}</b>\n"
