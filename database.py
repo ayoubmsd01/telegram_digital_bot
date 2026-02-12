@@ -1,5 +1,6 @@
 import sqlite3
 import os
+import datetime as dt
 
 DB_NAME = os.getenv("DB_PATH", "shop.db")
 
@@ -107,6 +108,15 @@ def init_db():
         except sqlite3.OperationalError:
             # Column likely already exists
             pass
+            
+    # Settings table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS settings (
+            key TEXT PRIMARY KEY,
+            value TEXT NOT NULL,
+            updated_at TEXT
+        )
+    ''')
     
     conn.commit()
     conn.close()
@@ -378,3 +388,21 @@ def update_order_status(order_id, status):
     cursor.execute('UPDATE orders SET status = ? WHERE order_id = ?', (status, order_id))
     conn.commit()
     conn.close()
+
+def set_setting(key, value):
+    conn = get_connection()
+    cursor = conn.cursor()
+    import datetime as dt
+    now = dt.datetime.now().isoformat()
+    # ensure value is string
+    cursor.execute('INSERT OR REPLACE INTO settings (key, value, updated_at) VALUES (?, ?, ?)', (key, str(value), now))
+    conn.commit()
+    conn.close()
+
+def get_setting(key):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT value FROM settings WHERE key = ?', (key,))
+    row = cursor.fetchone()
+    conn.close()
+    return row['value'] if row else None

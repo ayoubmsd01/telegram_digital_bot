@@ -83,6 +83,19 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
+    # In-Bot Stock Notification Controls
+    stock_keyboard = [
+        [InlineKeyboardButton("📣 Publish Stock Update (in-bot)", callback_data="admin_publish_stock")],
+        [InlineKeyboardButton("🛑 Hide Stock Update", callback_data="admin_hide_stock")]
+    ]
+    
+    await update.message.reply_text(
+        "📢 <b>Stock Notification Controls:</b>\n"
+        "(Updates only appear inside the bot)", 
+        reply_markup=InlineKeyboardMarkup(stock_keyboard), 
+        parse_mode='HTML'
+    )
+
 # ============================================================================
 # ADD PRODUCT HANDLERS
 # ============================================================================
@@ -755,6 +768,48 @@ async def show_recent_orders(update: Update, context: ContextTypes.DEFAULT_TYPE)
         error_msg = f"Error in recent_orders: {str(e)}\n{traceback.format_exc()}"
         print(error_msg)
         await update.message.reply_text(f"❌ Error fetching orders: {str(e)}")
+
+# ============================================================================
+# ============================================================================
+# STOCK UPDATE NOTIFICATIONS
+# ============================================================================
+
+async def admin_publish_stock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    user_id = query.from_user.id
+    
+    products = db.get_products()
+    available = [p for p in products if p['stock'] > 0]
+    
+    if not available:
+        await query.message.reply_text("⚠️ No products in stock to publish. / Нет товаров.")
+        return
+
+    # Helper for formatting
+    msg_ru = "📢 <b>Обновление наличия:</b>\n\n"
+    for p in available:
+        msg_ru += f"🔹 <b>{p['title_ru']}</b> - ${p['price_usd']} ({p['stock']} шт.)\n"
+    
+    msg_en = "📢 <b>Stock Update:</b>\n\n"
+    for p in available:
+        msg_en += f"🔹 <b>{p['title_en']}</b> - ${p['price_usd']} ({p['stock']} pcs)\n"
+
+    db.set_setting("stock_update_ru", msg_ru)
+    db.set_setting("stock_update_en", msg_en)
+    db.set_setting("stock_update_enabled", "1")
+    
+    await query.message.reply_text("✅ Stock update published! / Обновление опубликовано!")
+    print(f"[STOCK_UPDATE] published by admin_id={user_id} products_count={len(available)}")
+
+async def admin_hide_stock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    
+    db.set_setting("stock_update_enabled", "0")
+    
+    await query.message.reply_text("🛑 Stock update hidden. / Обновление скрыто.")
+    print(f"[STOCK_UPDATE] hidden by admin_id={query.from_user.id}")
 
 # ============================================================================
 # CANCEL HANDLER

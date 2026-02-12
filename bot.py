@@ -38,6 +38,17 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if db_lang:
         # User already has language set, skip selection
         await show_main_menu(update, context, db_lang)
+        
+        # Check Stock Notification
+        enabled = db.get_setting("stock_update_enabled")
+        if enabled == "1":
+            stock_msg = db.get_setting(f"stock_update_{db_lang}")
+            if stock_msg:
+                try:
+                    await update.message.reply_text(stock_msg, parse_mode='HTML')
+                    print(f"[STOCK_UPDATE] shown to user_id={user.id} in /start")
+                except Exception as e:
+                    print(f"Error sending stock update: {e}")
     else:
         # First time user, ask for language
         await update.message.reply_text(
@@ -131,6 +142,18 @@ async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE, lang
     await update.message.reply_text(s["choose_product"], reply_markup=reply_markup)
 
 async def show_stock(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    # Check Published Stock Update
+    enabled = db.get_setting("stock_update_enabled")
+    if enabled == "1":
+        stock_msg = db.get_setting(f"stock_update_{lang}")
+        if stock_msg:
+             try:
+                 await update.message.reply_text(stock_msg, parse_mode='HTML')
+                 print(f"[STOCK_UPDATE] shown to user_id={update.effective_user.id} lang={lang}")
+                 return
+             except Exception as e:
+                 print(f"Error sending stock update: {e}")
+
     products = db.get_products()
     s = strings.STRINGS[lang]
     msg = s["stock_title"] + "\n\n"
