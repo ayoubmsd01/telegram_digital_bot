@@ -795,12 +795,16 @@ async def admin_publish_stock_callback(update: Update, context: ContextTypes.DEF
     for p in available:
         msg_en += f"🔹 <b>{p['title_en']}</b> - ${p['price_usd']} ({p['stock']} pcs)\n"
 
-    db.set_setting("stock_update_ru", msg_ru)
-    db.set_setting("stock_update_en", msg_en)
-    db.set_setting("stock_update_enabled", "1")
-    
-    await query.message.reply_text("✅ Stock update published! / Обновление опубликовано!")
-    print(f"[STOCK_UPDATE] published by admin_id={user_id} products_count={len(available)}")
+    try:
+        db.set_setting("stock_update_ru", msg_ru)
+        db.set_setting("stock_update_en", msg_en)
+        db.set_setting("stock_update_enabled", "1")
+        
+        await query.message.reply_text("✅ Stock update published! / Обновление опубликовано!")
+        print(f"[STOCK_UPDATE] published by admin_id={user_id} products_count={len(available)}")
+    except Exception as e:
+        print(f"FAILED TO PUBLISH STOCK UPDATE: {e}")
+        await query.message.reply_text(f"❌ Error publishing: {str(e)}")
 
 async def admin_hide_stock_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query

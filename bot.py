@@ -42,8 +42,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         # Check Stock Notification
         try:
             enabled = db.get_setting("stock_update_enabled")
-            if enabled == "1":
+            if enabled and str(enabled).strip() == "1":
                 stock_msg = db.get_setting(f"stock_update_{db_lang}")
+                
+                # Fallback
+                if not stock_msg and db_lang != 'en':
+                    stock_msg = db.get_setting("stock_update_en")
+                    
                 if stock_msg:
                     await update.message.reply_text(stock_msg, parse_mode='HTML')
                     print(f"[STOCK_UPDATE] shown to user_id={user.id} in /start")
@@ -145,8 +150,13 @@ async def show_stock(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: s
     # Check Published Stock Update
     try:
         enabled = db.get_setting("stock_update_enabled")
-        if enabled == "1":
+        if enabled and str(enabled).strip() == "1":
             stock_msg = db.get_setting(f"stock_update_{lang}")
+            
+            # Fallback to English if translation missing
+            if not stock_msg and lang != 'en':
+                stock_msg = db.get_setting("stock_update_en")
+                
             if stock_msg:
                  await update.message.reply_text(stock_msg, parse_mode='HTML')
                  print(f"[STOCK_UPDATE] shown to user_id={update.effective_user.id} lang={lang}")
@@ -501,6 +511,12 @@ def main() -> None:
     
     application.add_handler(MessageHandler(filters.TEXT, menu_handler))
 
+    try:
+        print(f"DEBUG: Stock ENBL: {db.get_setting('stock_update_enabled')}")
+        val_ru = db.get_setting('stock_update_ru')
+        print(f"DEBUG: Stock RU: {str(val_ru)[:30] if val_ru else 'None'}")
+    except: pass
+    
     print("Bot is polling...")
     application.run_polling()
 
