@@ -129,6 +129,14 @@ def add_user(user_id, language):
     conn.commit()
     conn.close()
 
+def get_all_users():
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id, language FROM users')
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
 def get_user_language(user_id):
     conn = get_connection()
     cursor = conn.cursor()

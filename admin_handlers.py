@@ -4,6 +4,7 @@ Handles all admin-only operations including product management.
 """
 import datetime
 import traceback
+import asyncio
 
 import os
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardRemove
@@ -802,8 +803,45 @@ async def admin_publish_stock_callback(update: Update, context: ContextTypes.DEF
         
         # Immediate Verification
         check = db.get_setting("stock_update_enabled")
+        
         if str(check).strip() == "1":
             await query.message.reply_text("✅ Stock update published & VERIFIED!")
+            
+             # BROADCAST LOGIC
+            status_msg = await query.message.reply_text("🚀 Starting BROADCAST (Push)...")
+            
+            users = db.get_all_users()
+            sent_count = 0
+            fail_count = 0
+            total_db = len(users)
+            
+            # Use background task logic conceptually, but run here for simplicity as user requested
+            for i, u in enumerate(users):
+                try:
+                    uid = u['user_id']
+                    ulang = u.get('language')
+                    text = msg_ru if ulang == 'ru' else msg_en
+                    
+                    await context.bot.send_message(chat_id=uid, text=text, parse_mode='HTML')
+                    sent_count += 1
+                except Exception:
+                    # Likely blocked by user
+                    fail_count += 1
+                
+                # Rate limit safety: sleep every 25 messages for 1 sec
+                if (i + 1) % 25 == 0:
+                    await asyncio.sleep(1.0)
+            
+            final_report = (
+                f"✅ <b>Broadcast Completed!</b>\n"
+                f"• Sent: {sent_count}\n"
+                f"• Failed: {fail_count} (Blocked/Deleted)\n"
+                f"• Total DB Users: {total_db}"
+            )
+            
+            # Reply to admin
+            await context.bot.send_message(chat_id=user_id, text=final_report, parse_mode='HTML')
+            
         else:
             await query.message.reply_text(f"⚠️ Published but verification failed. Value: {check}")
             
