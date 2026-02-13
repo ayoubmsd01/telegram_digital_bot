@@ -40,15 +40,15 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         await show_main_menu(update, context, db_lang)
         
         # Check Stock Notification
-        enabled = db.get_setting("stock_update_enabled")
-        if enabled == "1":
-            stock_msg = db.get_setting(f"stock_update_{db_lang}")
-            if stock_msg:
-                try:
+        try:
+            enabled = db.get_setting("stock_update_enabled")
+            if enabled == "1":
+                stock_msg = db.get_setting(f"stock_update_{db_lang}")
+                if stock_msg:
                     await update.message.reply_text(stock_msg, parse_mode='HTML')
                     print(f"[STOCK_UPDATE] shown to user_id={user.id} in /start")
-                except Exception as e:
-                    print(f"Error sending stock update: {e}")
+        except Exception as e:
+            print(f"Error sending stock update: {e}")
     else:
         # First time user, ask for language
         await update.message.reply_text(
@@ -143,16 +143,16 @@ async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE, lang
 
 async def show_stock(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
     # Check Published Stock Update
-    enabled = db.get_setting("stock_update_enabled")
-    if enabled == "1":
-        stock_msg = db.get_setting(f"stock_update_{lang}")
-        if stock_msg:
-             try:
+    try:
+        enabled = db.get_setting("stock_update_enabled")
+        if enabled == "1":
+            stock_msg = db.get_setting(f"stock_update_{lang}")
+            if stock_msg:
                  await update.message.reply_text(stock_msg, parse_mode='HTML')
                  print(f"[STOCK_UPDATE] shown to user_id={update.effective_user.id} lang={lang}")
                  return
-             except Exception as e:
-                 print(f"Error sending stock update: {e}")
+    except Exception as e:
+        print(f"Error sending stock update: {e}")
 
     products = db.get_products()
     s = strings.STRINGS[lang]
@@ -496,6 +496,8 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(product_callback, pattern="^(prod_|buy_|back_to_products)"))
     application.add_handler(CallbackQueryHandler(cancel_order_callback, pattern="^cancel_"))
     application.add_handler(CallbackQueryHandler(check_pay_callback, pattern="^checkpay:"))
+    application.add_handler(CallbackQueryHandler(admin_handlers.admin_publish_stock_callback, pattern="^admin_publish_stock$"))
+    application.add_handler(CallbackQueryHandler(admin_handlers.admin_hide_stock_callback, pattern="^admin_hide_stock$"))
     
     application.add_handler(MessageHandler(filters.TEXT, menu_handler))
 
