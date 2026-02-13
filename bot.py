@@ -502,6 +502,7 @@ def main() -> None:
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("ad", admin_command))
     application.add_handler(CommandHandler("admin", admin_command))  # Alias for /ad
+    application.add_handler(CommandHandler("debug_stock", admin_handlers.debug_stock_settings)) # Debug
     application.add_handler(CallbackQueryHandler(language_callback, pattern="^lang_"))
     application.add_handler(CallbackQueryHandler(product_callback, pattern="^(prod_|buy_|back_to_products)"))
     application.add_handler(CallbackQueryHandler(cancel_order_callback, pattern="^cancel_"))

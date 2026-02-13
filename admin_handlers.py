@@ -800,8 +800,14 @@ async def admin_publish_stock_callback(update: Update, context: ContextTypes.DEF
         db.set_setting("stock_update_en", msg_en)
         db.set_setting("stock_update_enabled", "1")
         
-        await query.message.reply_text("✅ Stock update published! / Обновление опубликовано!")
-        print(f"[STOCK_UPDATE] published by admin_id={user_id} products_count={len(available)}")
+        # Immediate Verification
+        check = db.get_setting("stock_update_enabled")
+        if str(check).strip() == "1":
+            await query.message.reply_text("✅ Stock update published & VERIFIED!")
+        else:
+            await query.message.reply_text(f"⚠️ Published but verification failed. Value: {check}")
+            
+        print(f"[STOCK_UPDATE] published by admin_id={user_id} verified={check}")
     except Exception as e:
         print(f"FAILED TO PUBLISH STOCK UPDATE: {e}")
         await query.message.reply_text(f"❌ Error publishing: {str(e)}")
@@ -814,6 +820,21 @@ async def admin_hide_stock_callback(update: Update, context: ContextTypes.DEFAUL
     
     await query.message.reply_text("🛑 Stock update hidden. / Обновление скрыто.")
     print(f"[STOCK_UPDATE] hidden by admin_id={query.from_user.id}")
+
+async def debug_stock_settings(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Debug command to check current settings state."""
+    enbl = db.get_setting("stock_update_enabled")
+    ru = db.get_setting("stock_update_ru")
+    en = db.get_setting("stock_update_en")
+    
+    msg = (
+        f"🔍 <b>Debug Stock Settings:</b>\n"
+        f"Enabled: <code>{enbl}</code>\n"
+        f"RU Msg Len: {len(ru) if ru else 0}\n"
+        f"EN Msg Len: {len(en) if en else 0}\n"
+        f"Sample EN: <code>{str(en)[:20]}...</code>"
+    )
+    await update.message.reply_text(msg, parse_mode='HTML')
 
 # ============================================================================
 # CANCEL HANDLER
