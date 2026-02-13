@@ -167,6 +167,14 @@ def add_user(user_id, language, username=None):
     conn.commit()
     conn.close()
 
+def update_user_name(user_id, username):
+    """Update only the username if it changed or is missing."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('UPDATE users SET username = ? WHERE user_id = ?', (username, user_id))
+    conn.commit()
+    conn.close()
+
 def get_all_users():
     conn = get_connection()
     cursor = conn.cursor()

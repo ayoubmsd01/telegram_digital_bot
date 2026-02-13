@@ -108,6 +108,13 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await start(update, context) # Fallback
         return
 
+    # Update username opportunistically
+    try:
+        user = update.effective_user
+        uname = str(user.username) if user.username else str(user.first_name)
+        db.update_user_name(user_id, uname)
+    except: pass
+
     text = update.message.text
     s = strings.STRINGS[lang]
     
