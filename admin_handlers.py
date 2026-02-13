@@ -58,7 +58,7 @@ def is_command_button(text: str) -> bool:
     buttons = [
         "➕ Add Product", "✏️ Edit Product", "🗑️ Delete Product",
         "📦 Manage Stock", "📤 Manage Files", "🔑 Manage Codes",
-        "📊 Recent Orders", "⬅️ Back", "/start", "/admin", "/ad"
+        "📊 Recent Orders", "👥 Users Stats", "⬅️ Back", "/start", "/admin", "/ad"
     ]
     return text in buttons or text.startswith("/")
 
@@ -76,7 +76,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         ["➕ Add Product", "✏️ Edit Product"],
         ["🗑️ Delete Product", "📦 Manage Stock"],
         ["🔑 Manage Codes", "📊 Recent Orders"],
-        ["⬅️ Back"]
+        ["👥 Users Stats", "⬅️ Back"]
     ]
     
     await update.message.reply_text(
@@ -872,6 +872,41 @@ async def debug_stock_settings(update: Update, context: ContextTypes.DEFAULT_TYP
         f"EN Msg Len: {len(en) if en else 0}\n"
         f"Sample EN: <code>{str(en)[:20]}...</code>"
     )
+    await update.message.reply_text(msg, parse_mode='HTML')
+
+async def show_users_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show list of users."""
+    users = db.get_all_users()
+    total = len(users)
+    
+    if total == 0:
+        await update.message.reply_text("👥 No users recorded yet.")
+        return
+
+    msg = f"👥 <b>Registered Users: {total}</b>\n\n"
+    
+    # Sort: joined_at DESC (if exists), else user_id DESC
+    sorted_users = sorted(users, key=lambda x: str(x.get('joined_at') or '0'), reverse=True)
+    
+    limit = 60
+    shown = 0
+    
+    for u in sorted_users:
+        if shown >= limit:
+            msg += f"\n... and {total - shown} more."
+            break
+            
+        uid = u['user_id']
+        uname = u.get('username')
+        joined = u.get('joined_at')
+        
+        # Format
+        user_ref = f"@{uname}" if uname and uname != 'None' else f"<code>{uid}</code>"
+        date_str = str(joined)[:10] if joined else ""
+        
+        msg += f"{shown+1}. {user_ref} | {date_str}\n"
+        shown += 1
+        
     await update.message.reply_text(msg, parse_mode='HTML')
 
 # ============================================================================

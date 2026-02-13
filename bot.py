@@ -36,6 +36,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     db_lang = db.get_user_language(user.id)
     
     if db_lang:
+        # Update user tracking
+        username = str(user.username) if user.username else str(user.first_name)
+        db.add_user(user.id, db_lang, username)
+
         # User already has language set, skip selection
         await show_main_menu(update, context, db_lang)
         
@@ -67,9 +71,9 @@ async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     await query.answer()
     
     lang = query.data.split("_")[1]
-    user_id = query.from_user.id
-    
-    db.add_user(user_id, lang)
+    user = query.from_user
+    username = str(user.username) if user.username else str(user.first_name)
+    db.add_user(user_id, lang, username)
     
     await query.edit_message_text(text=f"Language set to {lang.upper()}")
     await show_main_menu(update, context, lang)
@@ -498,6 +502,7 @@ def main() -> None:
 
     # Recent Orders Handler
     application.add_handler(MessageHandler(filters.Regex("^📊 Recent Orders$"), admin_handlers.show_recent_orders))
+    application.add_handler(MessageHandler(filters.Regex("^👥 Users Stats$"), admin_handlers.show_users_stats))
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("ad", admin_command))

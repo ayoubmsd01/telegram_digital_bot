@@ -111,6 +111,24 @@ def init_db():
             
     # Settings table
     c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY, 
+            language TEXT,
+            username TEXT,
+            joined_at TEXT
+        )
+    ''')
+    
+    # Migration for users table (if older version exists)
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN username TEXT")
+    except: pass
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN joined_at TEXT")
+    except: pass
+
+    # Settings table
+    c.execute('''
         CREATE TABLE IF NOT EXISTS settings (
             key TEXT PRIMARY KEY,
             value TEXT NOT NULL,
@@ -122,17 +140,37 @@ def init_db():
     conn.close()
     print("Database tables initialized successfully.")
 
-def add_user(user_id, language):
+def add_user(user_id, language, username=None):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('INSERT OR REPLACE INTO users (user_id, language) VALUES (?, ?)', (user_id, language))
+    
+    # Get current time if new
+    import datetime as dt
+    now = dt.datetime.now().isoformat()
+    
+    # We use INSERT OR REPLACE. If updating, we want to keep joined_at if possible, 
+    # but REPLACE deletes the row. Ideally utilize ON CONFLICT strictly for updates.
+    # Simple approach: Check existence first.
+    cursor.execute('SELECT joined_at FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    
+    if row:
+        joined = row['joined_at']
+        cursor.execute('''
+            UPDATE users SET language = ?, username = ? WHERE user_id = ?
+        ''', (language, username, user_id))
+    else:
+        cursor.execute('''
+            INSERT INTO users (user_id, language, username, joined_at) VALUES (?, ?, ?, ?)
+        ''', (user_id, language, username, now))
+        
     conn.commit()
     conn.close()
 
 def get_all_users():
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT user_id, language FROM users')
+    cursor.execute('SELECT user_id, language, username, joined_at FROM users')
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]
