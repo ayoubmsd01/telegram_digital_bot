@@ -415,6 +415,13 @@ async def command_fallback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await admin_handlers.admin_panel(update, context)
     return ConversationHandler.END
 
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle errors in the dispatcher."""
+    logger.error(f"Exception while handling an update: {context.error}")
+    # Don't crash the bot on individual handler errors
+    import traceback
+    traceback.print_exc()
+
 def main() -> None:
     """Run the bot."""
     if not BOT_TOKEN:
@@ -423,6 +430,9 @@ def main() -> None:
         
     db.init_db()
     application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
+    
+    # Register global error handler to prevent crashes
+    application.add_error_handler(error_handler)
 
     # Add Product ConversationHandler
     add_product_handler = ConversationHandler(
@@ -530,8 +540,13 @@ def main() -> None:
         print(f"DEBUG: Stock RU: {str(val_ru)[:30] if val_ru else 'None'}")
     except: pass
     
-    print("Bot is polling...")
-    application.run_polling()
+    logger.info("Bot is starting polling...")
+    
+    # Drop pending updates to avoid processing stale messages after restart
+    application.run_polling(
+        drop_pending_updates=True,
+        allowed_updates=Update.ALL_TYPES
+    )
 
 async def expiration_task():
     while True:
@@ -539,4 +554,27 @@ async def expiration_task():
         await asyncio.sleep(60)
 
 if __name__ == "__main__":
-    main()
+    import time as _time
+    
+    MAX_BACKOFF = 300  # 5 minutes max wait
+    backoff = 10       # Start with 10 seconds
+    
+    while True:
+        try:
+            logger.info(f"Starting bot (backoff={backoff}s if crash)...")
+            main()
+            # If main() returns normally (e.g. graceful shutdown), exit
+            logger.info("Bot stopped gracefully.")
+            break
+        except KeyboardInterrupt:
+            logger.info("Bot stopped by user (Ctrl+C).")
+            break
+        except Exception as e:
+            logger.error(f"Bot crashed: {e}")
+            logger.info(f"Restarting in {backoff} seconds...")
+            _time.sleep(backoff)
+            backoff = min(backoff * 2, MAX_BACKOFF)
+            # Re-init DB in case connection was lost
+            try:
+                db.init_db()
+            except: pass
