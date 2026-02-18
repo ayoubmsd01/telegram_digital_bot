@@ -1,0 +1,119 @@
+# حل مشكلة توقف البوت (Bot 24/7 Solution)
+
+## 🚨 المشكلة الحالية
+
+البوت يتوقف بسبب خطأ **Conflict**:
+```
+telegram.error.Conflict: Conflict: terminated by other getUpdates request
+```
+
+هذا يعني أن هناك **نسخة أخرى من البوت تعمل** في مكان آخر وتحاول الاتصال بنفس Bot Token.
+
+## 🔍 أسباب محتملة:
+
+1. **Bot مُشتغل على سيرفر آخر** (مثل Render, Railway, Heroku, VPS)
+2. **Webhook مضبوط** على server آخر (تحقق من حساب Telegram Bot)
+3. **نسخ متعددة محلياً** (تم حلها بالـ scripts الجديدة)
+
+## ✅ الحلول المطبقة
+
+تم إنشاء الملفات التالية لضمان عمل البوت 24/7:
+
+### 1. Scripts التشغيل
+
+| Script | الوصف |
+|--------|-------|
+| `run_bot.sh` | تشغيل البوت + Webhook + Watchdog |
+| `stop_bot.sh` | إيقاف جميع العمليات |
+| `status.sh` | فحص حالة البوت |
+| `watchdog.sh` | مراقبة وإعادة تشغيل تلقائية |
+| `delete_webhook.py` | حذف Webhook من Telegram |
+
+### 2. كيفية الاستخدام
+
+```bash
+# تشغيل البوت
+./run_bot.sh
+
+# فحص الحالة
+./status.sh
+
+# إيقاف البوت
+./stop_bot.sh
+
+# حذف Webhook (إذا كان هناك conflict)
+python3 delete_webhook.py
+```
+
+### 3. ملفات الـ Logs
+
+جميع السجلات متوفرة في مجلد `logs/`:
+- `logs/bot.log` - سجل البوت الرئيسي
+- `logs/webhook.log` - سجل webhook server
+- `logs/watchdog.log` - سجل المراقب التلقائي
+- `logs/supervisor.log` - سجل التشغيل
+
+## 🔧 حل مشكلة Conflict
+
+إذا استمرت مشكلة Conflict:
+
+### الخطوة 1: تحقق من Webhook
+```bash
+python3 delete_webhook.py
+```
+
+### الخطوة 2: ابحث عن Deployments أخرى
+تحقق من:
+- Render (https://render.com)
+- Railway (https://railway.app)
+- Heroku (https://heroku.com)
+- أي VPS أو Server آخر
+
+### الخطوة 3: أوقف جميع النسخ
+```bash
+./stop_bot.sh
+sleep 5
+./run_bot.sh
+```
+
+## 🎯 للعمل 24/7 بدون توقف
+
+### الحل الأمثل: استخدام MacOS launchd
+
+<function_calls>
+<invoke name="write_to_file">
+<parameter name="CodeContent"><?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.telegram.bot</string>
+    
+    <key>ProgramArguments</key>
+    <array>
+        <string>/bin/bash</string>
+        <string>/Users/ayoubelmessaoudi/Downloads/4/Cod Conferme/telegram_digital_bot/run_bot.sh</string>
+    </array>
+    
+    <key>WorkingDirectory</key>
+    <string>/Users/ayoubelmessaoudi/Downloads/4/Cod Conferme/telegram_digital_bot</string>
+    
+    <key>RunAtLoad</key>
+    <true/>
+    
+    <key>KeepAlive</key>
+    <dict>
+        <key>SuccessfulExit</key>
+        <false/>
+    </dict>
+    
+    <key>StandardOutPath</key>
+    <string>/Users/ayoubelmessaoudi/Downloads/4/Cod Conferme/telegram_digital_bot/logs/launchd.log</string>
+    
+    <key>StandardErrorPath</key>
+    <string>/Users/ayoubelmessaoudi/Downloads/4/Cod Conferme/telegram_digital_bot/logs/launchd_error.log</string>
+    
+    <key>ThrottleInterval</key>
+    <integer>30</integer>
+</dict>
+</plist>
