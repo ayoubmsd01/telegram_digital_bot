@@ -473,12 +473,53 @@ async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             await query.message.reply_text(s["out_of_stock"])
             return
 
+        price = product["price_usd"]
+        user_balance = db.get_user_balance(user_id)
+        title = product["title_ru"] if lang == "ru" else product["title_en"]
+
+        # Strategy
+        if user_balance >= price:
+            # Full balance purchase
+            if db.deduct_user_balance(user_id, price):
+                db.decrease_stock(p_id)
+                # Create order with 0 invoice id
+                order_id = db.create_order(user_id, p_id, 0, price, used_balance=price, need_crypto=0.0)
+                db.update_order_status(order_id, 'paid')
+                
+                import datetime as dt
+                db.update_order_payment(order_id, price, "BALANCE", dt.datetime.now().isoformat())
+                
+                msg = s["buy_full_balance"].replace("{price}", f"{price:.2f}")
+                await query.message.reply_text(msg, parse_mode="HTML")
+                
+                # Deliver
+                await delivery_service.deliver_order(order_id, context.bot)
+            else:
+                await query.message.reply_text(s["topup_error"])
+            return
+
+        # Partial or no balance
+        need_crypto = price
+        used_balance = 0.0
+        
+        if user_balance > 0:
+            used_balance = user_balance
+            need_crypto = price - user_balance
+
         # Decrease Stock immediately (Reservation)
         db.decrease_stock(p_id)
 
+        # Deduct available balance
+        if used_balance > 0:
+            if not db.deduct_user_balance(user_id, used_balance):
+                # Race condition: balance became unavailable
+                db.increase_stock(p_id)
+                await query.message.reply_text(s["topup_error"])
+                return
+
         try:
             invoice = create_invoice(
-                amount=product["price_usd"],
+                amount=need_crypto,
                 currency="USD",
                 description=f"Buying {product['title_en']}",
                 payload=f"{user_id}:{p_id}" 
@@ -487,24 +528,24 @@ async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             if invoice and invoice.get("ok"):
                 result = invoice["result"]
                 invoice_id = result["invoice_id"]
-                pay_url = result["pay_url"] # Or bot_invoice_url
+                pay_url = result.get("bot_invoice_url") or result.get("pay_url") or result.get("mini_app_invoice_url", "")
                 
                 # Create Order in DB
-                order_id = db.create_order(user_id, p_id, invoice_id, product["price_usd"])
+                order_id = db.create_order(user_id, p_id, invoice_id, price, used_balance=used_balance, need_crypto=need_crypto)
                 
-                msg_text = (
-                    f"🧾 <b>Invocie #{invoice_id}</b>\n"
-                    f"📦 Product: {product['title_en']}\n"
-                    f"💰 Price: ${product['price_usd']}\n\n"
-                    f"⏳ Stock reserved for 15 minutes.\n"
-                    f"✅ Please pay using the link below:"
-                    if lang == "en" else
-                    f"🧾 <b>Счет #{invoice_id}</b>\n"
-                    f"📦 Товар: {product['title_ru']}\n"
-                    f"💰 Цена: ${product['price_usd']}\n\n"
-                    f"⏳ Товар зарезервирован на 15 минут.\n"
-                    f"✅ Оплатите по ссылке ниже:"
-                )
+                if used_balance > 0:
+                    msg_text = s["buy_partial_balance"].format(
+                        invoice_id=invoice_id,
+                        title=title,
+                        used_balance=f"${used_balance:.2f}",
+                        need_crypto=f"${need_crypto:.2f}"
+                    )
+                else:
+                    msg_text = s["buy_no_balance"].format(
+                        invoice_id=invoice_id,
+                        title=title,
+                        price=f"${price:.2f}"
+                    )
                 
                 check_btn_text = "✅ Check Payment" if lang != "ru" else "✅ Проверить оплату"
                 keyboard = [
@@ -514,13 +555,17 @@ async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 ]
                 await query.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
             else:
-                # Failed to create invoice, restore stock
+                # Failed to create invoice, restore stock and balance
                 db.increase_stock(p_id)
+                if used_balance > 0:
+                    db.add_user_balance(user_id, used_balance)
                 logger.error(f"Invoice creation failed: {invoice}")
                 await query.message.reply_text("Error creating invoice. Please try again.")
         except Exception as e:
-            # Restore stock on error
+            # Restore stock and balance on error
             db.increase_stock(p_id)
+            if used_balance > 0:
+                db.add_user_balance(user_id, used_balance)
             logger.error(f"Error: {e}")
             await query.message.reply_text("System error.")
 

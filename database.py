@@ -99,7 +99,9 @@ def init_db():
         ("delivered_type", "TEXT"),
         ("delivered_value", "TEXT"),
         ("delivered_filename", "TEXT"),
-        ("delivered_at", "TEXT")
+        ("delivered_at", "TEXT"),
+        ("used_balance", "REAL DEFAULT 0"),
+        ("need_crypto", "REAL DEFAULT 0")
     ]
     
     for col_name, col_type in columns_to_add:
@@ -352,6 +354,21 @@ def add_user_balance(user_id, amount):
     conn.close()
     return float(row['balance']) if row else amount
 
+def deduct_user_balance(user_id, amount):
+    """Deduct amount from user balance. Returns True if enough balance else False."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    
+    # Atomic deduction to prevent race conditions
+    cursor.execute(
+        'UPDATE users SET balance = balance - ? WHERE user_id = ? AND balance >= ?',
+        (amount, user_id, amount)
+    )
+    updated = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return updated
+
 def create_topup(invoice_id, user_id, amount, currency='USD'):
     """Create a topup record."""
     import datetime as dt
@@ -437,11 +454,13 @@ def get_products():
     return [dict(row) for row in rows]
 
 
-def create_order(user_id, product_id, invoice_id, price_usd=0.0):
+def create_order(user_id, product_id, invoice_id, price_usd=0.0, used_balance=0.0, need_crypto=0.0):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('INSERT INTO orders (user_id, product_id, invoice_id, price_usd, status) VALUES (?, ?, ?, ?, ?)',
-                   (user_id, product_id, invoice_id, price_usd, 'pending'))
+    cursor.execute(
+        'INSERT INTO orders (user_id, product_id, invoice_id, price_usd, status, used_balance, need_crypto) VALUES (?, ?, ?, ?, ?, ?, ?)',
+        (user_id, product_id, invoice_id, price_usd, 'pending', used_balance, need_crypto)
+    )
     order_id = cursor.lastrowid
     conn.commit()
     conn.close()
@@ -514,14 +533,22 @@ def get_expired_pending_orders(minutes=15):
 def cancel_order_db(order_id):
     conn = get_connection()
     cursor = conn.cursor()
-    # Get product_id to restore stock
-    cursor.execute('SELECT product_id, status FROM orders WHERE order_id = ?', (order_id,))
+    # Get order info to restore stock and refund balance
+    cursor.execute('SELECT product_id, status, user_id, used_balance FROM orders WHERE order_id = ?', (order_id,))
     row = cursor.fetchone()
     if row and row['status'] == 'pending':
         cursor.execute("UPDATE orders SET status = 'canceled' WHERE order_id = ?", (order_id,))
         # Increase stock back
         cursor.execute('UPDATE products SET stock = stock + 1 WHERE product_id = ?', (row['product_id'],))
+        # Refund used_balance back to user
+        used_bal = row['used_balance'] or 0
+        if used_bal > 0:
+            cursor.execute(
+                'UPDATE users SET balance = COALESCE(balance, 0) + ? WHERE user_id = ?',
+                (used_bal, row['user_id'])
+            )
         conn.commit()
+        conn.close()
         return True
     conn.close()
     return False

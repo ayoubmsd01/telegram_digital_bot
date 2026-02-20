@@ -73,6 +73,10 @@ STRINGS = {
         # My purchases / topups
         "no_purchases": "🛒 У вас пока нет покупок.",
         "no_topups": "💳 У вас пока нет пополнений.",
+        # Balance Purchases
+        "buy_full_balance": "✅ Покупка успешна. Списано с баланса: ${price}.",
+        "buy_partial_balance": "🧾 <b>Счет #{invoice_id}</b>\n📦 Товар: {title}\n💰 Используем с баланса: <b>${used_balance}</b>\n➕ Доплатите только: <b>${need_crypto}</b> через CryptoBot.\n\n⏳ Товар зарезервирован на 15 минут.\n✅ Оплатите по ссылке ниже:",
+        "buy_no_balance": "🧾 <b>Счет #{invoice_id}</b>\n📦 Товар: {title}\n💰 Для покупки оплатите <b>${price}</b> через CryptoBot.\n\n⏳ Товар зарезервирован на 15 минут.\n✅ Оплатите по ссылке ниже:",
     },
     "en": {
         "welcome": "Welcome! Please choose your language.",
@@ -148,6 +152,10 @@ STRINGS = {
         # My purchases / topups
         "no_purchases": "🛒 You have no purchases yet.",
         "no_topups": "💳 You have no top-ups yet.",
+        # Balance Purchases
+        "buy_full_balance": "✅ Purchase successful. Deducted from balance: ${price}.",
+        "buy_partial_balance": "🧾 <b>Invoice #{invoice_id}</b>\n📦 Product: {title}\n💰 Using from balance: <b>${used_balance}</b>\n➕ Please pay only: <b>${need_crypto}</b> via CryptoBot.\n\n⏳ Stock reserved for 15 minutes.\n✅ Please pay using the link below:",
+        "buy_no_balance": "🧾 <b>Invoice #{invoice_id}</b>\n📦 Product: {title}\n💰 To purchase, please pay <b>${price}</b> via CryptoBot.\n\n⏳ Stock reserved for 15 minutes.\n✅ Please pay using the link below:",
     }
 }
 
