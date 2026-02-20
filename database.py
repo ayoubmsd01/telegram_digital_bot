@@ -633,6 +633,7 @@ def reserve_stock_item(product_id):
         SELECT stock_id, type, content, file_id 
         FROM stock_items 
         WHERE product_id = ? AND status = 'available' 
+        ORDER BY stock_id ASC
         LIMIT 1
     ''', (product_id,))
     row = cursor.fetchone()

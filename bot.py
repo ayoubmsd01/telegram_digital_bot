@@ -384,8 +384,11 @@ async def _send_category_list(update: Update, context: ContextTypes.DEFAULT_TYPE
     s = strings.STRINGS[lang]
     
     if not categories:
-        # Fallback if no categories, directly show products
-        await _send_product_list(update, context, lang, category_id=None, edit_message=edit_message)
+        msg = s.get("no_categories", "No categories available.")
+        if edit_message:
+            await update.callback_query.edit_message_text(msg)
+        else:
+            await update.message.reply_text(msg)
         return
 
     keyboard = []
@@ -409,7 +412,7 @@ async def _send_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE,
     s = strings.STRINGS[lang]
     
     if not products:
-        msg = "No products available in this category."
+        msg = s.get("no_products", "No products available in this category.")
         keyboard = [[InlineKeyboardButton(s.get("btn_back_categories", "⬅️ Back"), callback_data="back_to_categories")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         if edit_message:
@@ -842,7 +845,7 @@ def main() -> None:
     application.add_handler(CommandHandler("admin", admin_command))  # Alias for /ad
     application.add_handler(CommandHandler("debug_stock", admin_handlers.debug_stock_settings)) # Debug
     application.add_handler(CallbackQueryHandler(language_callback, pattern="^lang_"))
-    application.add_handler(CallbackQueryHandler(product_callback, pattern="^(prod_|buy_|back_to_products)"))
+    application.add_handler(CallbackQueryHandler(product_callback, pattern="^(cat_|prod_|buy_|fav_|back_to_)"))
     application.add_handler(CallbackQueryHandler(cancel_order_callback, pattern="^cancel_"))
     application.add_handler(CallbackQueryHandler(check_pay_callback, pattern="^checkpay:"))
     application.add_handler(CallbackQueryHandler(admin_handlers.admin_publish_stock_callback, pattern="^admin_publish_stock$"))
