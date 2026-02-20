@@ -128,11 +128,67 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
     
     user_id = update.effective_user.id
     
-    # Check if admin is waiting for ban/unban input
+    # Check if admin is waiting for ban/unban or balance input
     if admin_handlers.is_admin(update.effective_user):
         handled = await admin_handlers.process_ban_unban_input(update, context)
         if handled:
             return
+        handled = await admin_handlers.process_admin_balance_input(update, context)
+        if handled:
+            return
+    
+    # Check if user is in topup amount flow
+    if context.user_data.get('awaiting_topup_amount'):
+        context.user_data.pop('awaiting_topup_amount', None)
+        text_input = update.message.text.strip()
+        lang = db.get_user_language(user_id) or "en"
+        s = strings.STRINGS[lang]
+        
+        # Validate amount
+        try:
+            amount = float(text_input.replace(",", "."))
+            if amount < 1:
+                raise ValueError
+        except (ValueError, TypeError):
+            await update.message.reply_text(s["topup_invalid_amount"])
+            return
+        
+        # Create CryptoBot invoice
+        try:
+            result = create_invoice(
+                amount=amount,
+                currency="USD",
+                description=f"Balance top-up ${amount:.2f}",
+                payload=f"topup_{user_id}_{amount}"
+            )
+            
+            if result.get("ok") and result.get("result"):
+                inv = result["result"]
+                invoice_id = inv["invoice_id"]
+                pay_url = inv.get("bot_invoice_url") or inv.get("pay_url") or inv.get("mini_app_invoice_url", "")
+                
+                # Save topup record
+                db.create_topup(invoice_id, user_id, amount, 'USD')
+                
+                # Send payment link
+                keyboard = [
+                    [InlineKeyboardButton(s["topup_pay_btn"].replace("{amount}", f"{amount:.2f}"), url=pay_url)],
+                    [InlineKeyboardButton(s["topup_check_btn"], callback_data=f"topup_check:{invoice_id}")]
+                ]
+                
+                await update.message.reply_text(
+                    s["topup_invoice_created"].replace("{amount}", f"{amount:.2f}"),
+                    parse_mode='HTML',
+                    reply_markup=InlineKeyboardMarkup(keyboard)
+                )
+            else:
+                error_msg = result.get("error", {}).get("name", "Unknown")
+                logger.error(f"CryptoBot invoice error: {error_msg}")
+                await update.message.reply_text(s["topup_error"])
+        except Exception as e:
+            logger.error(f"Topup create error: {e}")
+            await update.message.reply_text(s["topup_error"])
+        return
     
     lang = db.get_user_language(user_id)
     if not lang:
@@ -169,7 +225,7 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         pass
 
 async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
-    """Show user profile with ID, balance, purchases count, and registration date."""
+    """Show user profile with inline buttons."""
     user = update.effective_user
     user_id = user.id
     s = strings.STRINGS[lang]
@@ -183,8 +239,8 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE, lang:
     if profile and profile.get('joined_at'):
         registered_at = str(profile['joined_at'])[:10]
     
-    # Balance (no balance system yet, default 0)
-    balance = "0.00"
+    # Get real balance from DB
+    balance = f"{db.get_user_balance(user_id):.2f}"
     
     # Build profile message
     msg = s["profile_text"].format(
@@ -194,7 +250,133 @@ async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE, lang:
         registered_at=registered_at
     )
     
-    await update.message.reply_text(msg, parse_mode='HTML')
+    # Inline buttons
+    keyboard = [
+        [InlineKeyboardButton(s["btn_topup"], callback_data="profile_topup")],
+        [InlineKeyboardButton(s["btn_my_purchases"], callback_data="profile_purchases")],
+        [InlineKeyboardButton(s["btn_my_topups"], callback_data="profile_topups")],
+        [InlineKeyboardButton(s["btn_activate_coupon"], callback_data="profile_coupon")],
+    ]
+    
+    await update.message.reply_text(
+        msg, parse_mode='HTML',
+        reply_markup=InlineKeyboardMarkup(keyboard)
+    )
+
+async def profile_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle profile inline button clicks."""
+    if is_user_banned(update):
+        return
+    
+    query = update.callback_query
+    await query.answer()
+    user = query.from_user
+    user_id = user.id
+    lang = db.get_user_language(user_id) or "en"
+    s = strings.STRINGS[lang]
+    data = query.data
+    
+    if data == "profile_topup":
+        # Ask for amount
+        context.user_data['awaiting_topup_amount'] = True
+        cancel_kb = InlineKeyboardMarkup([
+            [InlineKeyboardButton(s["topup_cancel"], callback_data="topup_cancel")]
+        ])
+        await query.message.reply_text(
+            s["topup_enter_amount"], parse_mode='HTML',
+            reply_markup=cancel_kb
+        )
+    
+    elif data == "profile_purchases":
+        # Show user's completed orders
+        orders = db.get_user_orders(user_id) if hasattr(db, 'get_user_orders') else []
+        if not orders:
+            await query.message.reply_text(s["no_purchases"])
+            return
+        msg = f"🛒 <b>{'Мои покупки' if lang == 'ru' else 'My purchases'}:</b>\n\n"
+        for i, o in enumerate(orders[:20], 1):
+            status_icon = "✅" if o.get('status') in ('paid', 'delivered') else "⏳"
+            amount = o.get('price_usd', 0)
+            date = str(o.get('created_at', ''))[:10]
+            msg += f"{i}. {status_icon} ${amount} — {date}\n"
+        await query.message.reply_text(msg, parse_mode='HTML')
+    
+    elif data == "profile_topups":
+        # Show topup history
+        topups = db.get_user_topups(user_id)
+        if not topups:
+            await query.message.reply_text(s["no_topups"])
+            return
+        msg = f"💳 <b>{'Мои пополнения' if lang == 'ru' else 'My top-ups'}:</b>\n\n"
+        for i, t in enumerate(topups[:20], 1):
+            status_icon = "✅" if t['status'] == 'paid' else "⏳"
+            msg += f"{i}. {status_icon} ${t['amount']:.2f} — {str(t['created_at'])[:10]}\n"
+        await query.message.reply_text(msg, parse_mode='HTML')
+    
+    elif data == "profile_coupon":
+        coupon_msg = "🎁 " + ("Функция купонов скоро будет доступна!" if lang == 'ru' else "Coupon feature coming soon!")
+        await query.message.reply_text(coupon_msg)
+
+async def topup_cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Cancel topup flow."""
+    if is_user_banned(update):
+        return
+    query = update.callback_query
+    await query.answer()
+    context.user_data.pop('awaiting_topup_amount', None)
+    lang = db.get_user_language(query.from_user.id) or "en"
+    await query.message.reply_text(strings.STRINGS[lang]["topup_cancelled"])
+
+async def topup_check_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Check if topup invoice is paid."""
+    if is_user_banned(update):
+        return
+    query = update.callback_query
+    await query.answer()
+    
+    user_id = query.from_user.id
+    lang = db.get_user_language(user_id) or "en"
+    s = strings.STRINGS[lang]
+    
+    # Extract invoice_id from callback data: topup_check:{invoice_id}
+    invoice_id = int(query.data.split(":")[1])
+    
+    # Check in our DB first
+    topup = db.get_topup_by_invoice(invoice_id)
+    if not topup:
+        await query.message.reply_text("❌ Invoice not found.")
+        return
+    
+    if topup['status'] == 'paid':
+        await query.message.reply_text(s["topup_already_paid"])
+        return
+    
+    # Check with CryptoPay API
+    try:
+        from crypto_pay import get_invoices
+        result = get_invoices(invoice_ids=invoice_id)
+        
+        if result.get("ok") and result.get("result", {}).get("items"):
+            invoice = result["result"]["items"][0]
+            if invoice.get("status") == "paid":
+                import datetime as dt
+                amount = topup['amount']
+                
+                # Update topup status (prevents double-credit)
+                updated = db.update_topup_status(invoice_id, 'paid', dt.datetime.now().isoformat())
+                if updated:
+                    new_balance = db.add_user_balance(user_id, amount)
+                    success_msg = s["topup_success"].replace("{amount}", f"{amount:.2f}").replace("{new_balance}", f"{new_balance:.2f}")
+                    await query.message.reply_text(success_msg, parse_mode='HTML')
+                else:
+                    await query.message.reply_text(s["topup_already_paid"])
+            else:
+                await query.message.reply_text(s["topup_not_paid"])
+        else:
+            await query.message.reply_text(s["topup_not_paid"])
+    except Exception as e:
+        logger.error(f"Topup check error: {e}")
+        await query.message.reply_text(s["topup_not_paid"])
 
 async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
     products = db.get_products()
@@ -603,6 +785,15 @@ def main() -> None:
     # Ban Management handlers
     application.add_handler(MessageHandler(filters.Regex("^🚫 Ban Management$"), admin_handlers.ban_management_panel))
     application.add_handler(CallbackQueryHandler(admin_handlers.ban_callback, pattern="^(ban_start|unban_start|ban_list)$"))
+    
+    # Profile & Topup handlers
+    application.add_handler(CallbackQueryHandler(profile_callback, pattern="^profile_(topup|purchases|topups|coupon)$"))
+    application.add_handler(CallbackQueryHandler(topup_cancel_callback, pattern="^topup_cancel$"))
+    application.add_handler(CallbackQueryHandler(topup_check_callback, pattern="^topup_check:"))
+    
+    # Admin Balance handler
+    application.add_handler(MessageHandler(filters.Regex("^➕ Add Balance$"), admin_handlers.admin_add_balance_panel))
+    application.add_handler(CallbackQueryHandler(admin_handlers.admin_balance_callback, pattern="^admin_balance_start$"))
     
     application.add_handler(MessageHandler(filters.TEXT, menu_handler))
 

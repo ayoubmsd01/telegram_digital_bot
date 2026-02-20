@@ -79,7 +79,37 @@ async def crypto_webhook(secret_path: str, request: Request):
              logger.error("No invoice_id found in payload")
              return {"ok": True}
 
-        # Check order in DB
+        # Check if this is a topup payment (payload starts with "topup_")
+        invoice_payload = payload.get("payload", "")
+        
+        # Check topup first
+        topup = db.get_topup_by_invoice(invoice_id)
+        if topup and topup['status'] != 'paid':
+            import datetime as dt
+            amount = topup['amount']
+            user_id = topup['user_id']
+            
+            # Update status (prevents double-credit)
+            updated = db.update_topup_status(invoice_id, 'paid', dt.datetime.now().isoformat())
+            if updated:
+                new_balance = db.add_user_balance(user_id, amount)
+                logger.info(f"[WEBHOOK] Topup credited: user={user_id}, amount=${amount}, new_balance=${new_balance}")
+                
+                # Send confirmation to user
+                try:
+                    lang = db.get_user_language(user_id) or "en"
+                    if lang == "ru":
+                        msg = f"✅ Оплата подтверждена. Баланс пополнен на ${amount:.2f}.\nНовый баланс: <b>${new_balance:.2f}</b>"
+                    else:
+                        msg = f"✅ Payment confirmed. Balance increased by ${amount:.2f}.\nNew balance: <b>${new_balance:.2f}</b>"
+                    await bot.send_message(chat_id=user_id, text=msg, parse_mode='HTML')
+                except Exception as e:
+                    logger.error(f"[WEBHOOK] Failed to send topup confirmation: {e}")
+            else:
+                logger.info(f"[WEBHOOK] Topup {invoice_id} already processed")
+            return {"ok": True}
+
+        # Check order in DB (existing product purchase flow)
         order = db.get_order_by_invoice(invoice_id)
         if not order:
             logger.error(f"[WEBHOOK] Order not found for invoice {invoice_id}")

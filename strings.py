@@ -53,6 +53,26 @@ STRINGS = {
         "check_payment": "🔄 Проверить оплату",
         "choose_product": "Выберите товар:",
         "profile_text": "👤 <b>Ваш профиль:</b>\n\n────────────────────\n\n🪣 Мой ID: <code>{user_id}</code>\n\n💰 Мой баланс: {balance} $\n\n🛒 Количество покупок: {purchases_count}\n\n⏱ Регистрация: {registered_at}\n\n────────────────────\nℹ️ <i>Usernames update automatically when users interact.</i>",
+        # Profile buttons
+        "btn_topup": "💰 Пополнить баланс",
+        "btn_my_purchases": "🛒 Мои покупки",
+        "btn_my_topups": "💳 Мои пополнения",
+        "btn_activate_coupon": "🎁 Активировать купон",
+        # Topup flow
+        "topup_enter_amount": "💰 Введите сумму пополнения (например 10):\n\n<i>Минимум: $1</i>",
+        "topup_invalid_amount": "❌ Неверная сумма. Введите число от 1 и выше.",
+        "topup_invoice_created": "✅ Ссылка для оплаты создана.\nСумма: <b>${amount}</b>\n\nНажмите «Оплатить».",
+        "topup_pay_btn": "💳 Оплатить ${amount}",
+        "topup_check_btn": "🔄 Проверить оплату",
+        "topup_success": "✅ Оплата подтверждена. Баланс пополнен на ${amount}.\nНовый баланс: <b>${new_balance}</b>",
+        "topup_not_paid": "⏳ Оплата еще не получена. Попробуйте позже.",
+        "topup_already_paid": "✅ Эта оплата уже была обработана.",
+        "topup_error": "❌ Ошибка создания счета. Попробуйте позже.",
+        "topup_cancel": "❌ Отмена",
+        "topup_cancelled": "❌ Пополнение отменено.",
+        # My purchases / topups
+        "no_purchases": "🛒 У вас пока нет покупок.",
+        "no_topups": "💳 У вас пока нет пополнений.",
     },
     "en": {
         "welcome": "Welcome! Please choose your language.",
@@ -108,6 +128,26 @@ STRINGS = {
         "check_payment": "🔄 Check Payment",
         "choose_product": "Choose a product:",
         "profile_text": "👤 <b>Your profile:</b>\n\n────────────────────\n\n🪣 My ID: <code>{user_id}</code>\n\n💰 My balance: {balance} $\n\n🛒 Purchases: {purchases_count}\n\n⏱ Registration: {registered_at}\n\n────────────────────\nℹ️ <i>Usernames update automatically when users interact.</i>",
+        # Profile buttons
+        "btn_topup": "💰 Top up balance",
+        "btn_my_purchases": "🛒 My purchases",
+        "btn_my_topups": "💳 My top-ups",
+        "btn_activate_coupon": "🎁 Activate coupon",
+        # Topup flow
+        "topup_enter_amount": "💰 Enter top-up amount (e.g., 10):\n\n<i>Minimum: $1</i>",
+        "topup_invalid_amount": "❌ Invalid amount. Enter a number from 1 and above.",
+        "topup_invoice_created": "✅ Payment link created.\nAmount: <b>${amount}</b>\n\nClick \"Pay\".",
+        "topup_pay_btn": "💳 Pay ${amount}",
+        "topup_check_btn": "🔄 Check payment",
+        "topup_success": "✅ Payment confirmed. Balance increased by ${amount}.\nNew balance: <b>${new_balance}</b>",
+        "topup_not_paid": "⏳ Payment not received yet. Try again later.",
+        "topup_already_paid": "✅ This payment has already been processed.",
+        "topup_error": "❌ Error creating invoice. Try again later.",
+        "topup_cancel": "❌ Cancel",
+        "topup_cancelled": "❌ Top-up cancelled.",
+        # My purchases / topups
+        "no_purchases": "🛒 You have no purchases yet.",
+        "no_topups": "💳 You have no top-ups yet.",
     }
 }
 

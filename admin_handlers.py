@@ -62,6 +62,7 @@ def is_command_button(text: str) -> bool:
         "➕ Add Product", "✏️ Edit Product", "🗑️ Delete Product",
         "📦 Manage Stock", "📤 Manage Files", "🔑 Manage Codes",
         "📊 Recent Orders", "👥 Users Stats", "🚫 Ban Management",
+        "➕ Add Balance",
         "⬅️ Back", "/start", "/admin", "/ad"
     ]
     return text in buttons or text.startswith("/")
@@ -81,7 +82,7 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         ["🗑️ Delete Product", "📦 Manage Stock"],
         ["🔑 Manage Codes", "📊 Recent Orders"],
         ["👥 Users Stats", "🚫 Ban Management"],
-        ["⬅️ Back"]
+        ["➕ Add Balance", "⬅️ Back"]
     ]
     
     await update.message.reply_text(
@@ -1093,3 +1094,108 @@ async def process_ban_unban_input(update: Update, context: ContextTypes.DEFAULT_
         return True
     
     return False  # Not a ban/unban input
+
+# ============================================================================
+# ADMIN BALANCE MANAGEMENT
+# ============================================================================
+
+async def admin_add_balance_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show admin balance management panel."""
+    user = update.effective_user
+    if not is_admin(user):
+        return
+    
+    keyboard = [
+        [InlineKeyboardButton("➕ Add balance to user", callback_data="admin_balance_start")]
+    ]
+    
+    await update.message.reply_text(
+        "➕ <b>Add Balance</b>\n\n"
+        "Manually add balance to any user.\n"
+        "Press the button below to start.",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='HTML'
+    )
+
+async def admin_balance_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle admin balance inline button."""
+    query = update.callback_query
+    user = query.from_user
+    if not is_admin(user):
+        return
+    
+    await query.answer()
+    
+    await query.message.reply_text(
+        "➕ <b>Add Balance</b>\n\n"
+        "Send: <code>user_id amount</code>\n"
+        "Example: <code>1549155542 10</code>\n\n"
+        "<i>Send /cancel to cancel.</i>",
+        parse_mode='HTML'
+    )
+    context.user_data['awaiting_admin_balance'] = True
+
+async def process_admin_balance_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Process admin balance input. Returns True if handled."""
+    user = update.effective_user
+    if not is_admin(user):
+        return False
+    
+    if not context.user_data.get('awaiting_admin_balance'):
+        return False
+    
+    text = update.message.text.strip()
+    
+    # Handle /cancel
+    if text == '/cancel':
+        context.user_data.pop('awaiting_admin_balance', None)
+        await update.message.reply_text("❌ Operation cancelled.")
+        return True
+    
+    context.user_data.pop('awaiting_admin_balance', None)
+    
+    # Parse input: user_id amount
+    parts = text.split()
+    if len(parts) != 2:
+        await update.message.reply_text(
+            "❌ Invalid format.\nSend: <code>user_id amount</code>\nExample: <code>1549155542 10</code>",
+            parse_mode='HTML'
+        )
+        return True
+    
+    try:
+        target_id = int(parts[0])
+        amount = float(parts[1])
+        if amount <= 0:
+            raise ValueError("Amount must be positive")
+    except (ValueError, TypeError):
+        await update.message.reply_text(
+            "❌ Invalid input. user_id must be a number and amount must be positive.",
+        )
+        return True
+    
+    # Check if user exists
+    profile = db.get_user_profile(target_id)
+    if not profile:
+        await update.message.reply_text(
+            f"❌ User <code>{target_id}</code> not found in database.",
+            parse_mode='HTML'
+        )
+        return True
+    
+    # Add balance
+    new_balance = db.add_user_balance(target_id, amount)
+    
+    # Log adjustment
+    db.add_admin_adjustment(user.id, target_id, amount, "Manual admin adjustment")
+    
+    username = profile.get('username', 'Unknown')
+    
+    await update.message.reply_text(
+        f"✅ <b>Balance Added!</b>\n\n"
+        f"User: <code>{target_id}</code> (@{username})\n"
+        f"Added: <b>${amount:.2f}</b>\n"
+        f"New balance: <b>${new_balance:.2f}</b>",
+        parse_mode='HTML'
+    )
+    return True

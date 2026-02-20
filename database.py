@@ -144,6 +144,38 @@ def init_db():
         )
     ''')
     
+    # Topups table for balance top-up invoices
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS topups (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            invoice_id INTEGER UNIQUE,
+            user_id INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            currency TEXT DEFAULT 'USD',
+            status TEXT DEFAULT 'pending',
+            created_at TEXT NOT NULL,
+            paid_at TEXT,
+            FOREIGN KEY(user_id) REFERENCES users(user_id)
+        )
+    ''')
+    
+    # Admin balance adjustments log
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS admin_adjustments (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            admin_id INTEGER NOT NULL,
+            user_id INTEGER NOT NULL,
+            amount REAL NOT NULL,
+            note TEXT,
+            created_at TEXT NOT NULL
+        )
+    ''')
+    
+    # Migration: add balance column to users if missing
+    try:
+        c.execute("ALTER TABLE users ADD COLUMN balance REAL DEFAULT 0.0")
+    except: pass
+    
     conn.commit()
     conn.close()
     
@@ -275,10 +307,10 @@ def get_user_language(user_id):
     return row['language'] if row else None
 
 def get_user_profile(user_id):
-    """Get user profile data (joined_at, language, username)."""
+    """Get user profile data."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT user_id, language, username, joined_at FROM users WHERE user_id = ?', (user_id,))
+    cursor.execute('SELECT user_id, language, username, joined_at, balance FROM users WHERE user_id = ?', (user_id,))
     row = cursor.fetchone()
     conn.close()
     return dict(row) if row else None
@@ -294,6 +326,107 @@ def get_user_purchases_count(user_id):
     row = cursor.fetchone()
     conn.close()
     return row['cnt'] if row else 0
+
+def get_user_balance(user_id):
+    """Get user balance."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT balance FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row and row['balance'] is not None:
+        return float(row['balance'])
+    return 0.0
+
+def add_user_balance(user_id, amount):
+    """Add amount to user balance (atomic). Returns new balance."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        'UPDATE users SET balance = COALESCE(balance, 0) + ? WHERE user_id = ?',
+        (amount, user_id)
+    )
+    conn.commit()
+    cursor.execute('SELECT balance FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return float(row['balance']) if row else amount
+
+def create_topup(invoice_id, user_id, amount, currency='USD'):
+    """Create a topup record."""
+    import datetime as dt
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        'INSERT INTO topups (invoice_id, user_id, amount, currency, status, created_at) VALUES (?, ?, ?, ?, ?, ?)',
+        (invoice_id, user_id, amount, currency, 'pending', dt.datetime.now().isoformat())
+    )
+    conn.commit()
+    conn.close()
+
+def update_topup_status(invoice_id, status, paid_at=None):
+    """Update topup status. Returns True if updated, False if already in that status."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    if paid_at:
+        cursor.execute(
+            'UPDATE topups SET status = ?, paid_at = ? WHERE invoice_id = ? AND status != ?',
+            (status, paid_at, invoice_id, status)
+        )
+    else:
+        cursor.execute(
+            'UPDATE topups SET status = ? WHERE invoice_id = ? AND status != ?',
+            (status, invoice_id, status)
+        )
+    updated = cursor.rowcount > 0
+    conn.commit()
+    conn.close()
+    return updated
+
+def get_topup_by_invoice(invoice_id):
+    """Get topup record by CryptoPay invoice_id."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM topups WHERE invoice_id = ?', (invoice_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def get_user_orders(user_id, limit=20):
+    """Get orders for a user."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT * FROM orders WHERE user_id = ? AND status IN ('paid', 'delivered') ORDER BY created_at DESC LIMIT ?",
+        (user_id, limit)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def get_user_topups(user_id, limit=20):
+    """Get topup history for a user."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        'SELECT * FROM topups WHERE user_id = ? ORDER BY created_at DESC LIMIT ?',
+        (user_id, limit)
+    )
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+def add_admin_adjustment(admin_id, user_id, amount, note=None):
+    """Log an admin balance adjustment."""
+    import datetime as dt
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        'INSERT INTO admin_adjustments (admin_id, user_id, amount, note, created_at) VALUES (?, ?, ?, ?, ?)',
+        (admin_id, user_id, amount, note, dt.datetime.now().isoformat())
+    )
+    conn.commit()
+    conn.close()
 
 def get_products():
     conn = get_connection()
