@@ -456,7 +456,6 @@ async def show_stock(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: s
             if stock_msg:
                  await update.message.reply_text(stock_msg, parse_mode='HTML')
                  print(f"[STOCK_UPDATE] shown to user_id={update.effective_user.id} lang={lang}")
-                 return
     except Exception as e:
         print(f"Error sending stock update: {e}")
 
