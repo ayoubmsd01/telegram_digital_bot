@@ -57,6 +57,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         db.add_user(user.id, db_lang, username)
 
         # User already has language set, skip selection
+        
+        # Check for deep links (e.g., /start prod_123)
+        if context.args:
+            arg = context.args[0]
+            if arg.startswith("prod_"):
+                try:
+                    p_id = int(arg.split("_")[1])
+                    await _show_product_details(update, context, user.id, p_id, db_lang, edit_message=False)
+                    return
+                except ValueError:
+                    pass
+
         await show_main_menu(update, context, db_lang)
         
         # Check Stock Notification
@@ -421,26 +433,90 @@ async def _send_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE,
             await update.message.reply_text(msg, reply_markup=reply_markup)
         return
 
-    keyboard = []
+    # Build Header
+    cat_name = ""
+    if category_id:
+        c = db.get_category(category_id)
+        if c:
+            cat_name = c["name_ru"] if lang == "ru" else c["name_en"]
+            
+    if cat_name:
+        msg = f"— — — {cat_name} — — —\n\n"
+    else:
+        msg = f"— — — 📦 Products — — —\n\n"
+        
+    bot_username = context.bot.username
+    
     for p in products:
         p_id = p["product_id"]
         title = p["title_ru"] if lang == "ru" else p["title_en"]
         price = p["price_usd"]
         stock = p["stock"]
         
-        # New format: Name | Price$ | Stock шт.
         stock_text = f"{stock} шт." if lang == "ru" else f"{stock} pcs."
-        btn_text = f"{title} | {price:.2f}$ | {stock_text}"
-        keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"prod_{p_id}")])
+        
+        parts = title.split('|', 1)
+        name_part = parts[0].strip()
+        rest_part = ""
+        if len(parts) > 1:
+            rest_part = " | " + parts[1].strip()
+            
+        link = f'<a href="https://t.me/{bot_username}?start=prod_{p_id}">{name_part}</a>'
+        line = f"{link}{rest_part} | {price:g} $ | {stock_text}\n"
+        msg += line
     
     # Add back button to categories
-    keyboard.append([InlineKeyboardButton(s.get("btn_back_categories", "⬅️ Back to categories"), callback_data="back_to_categories")])
+    keyboard = [[InlineKeyboardButton(s.get("btn_back_categories", "⬅️ Back to categories"), callback_data="back_to_categories")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     if edit_message:
-        await update.callback_query.edit_message_text(s["choose_product"], reply_markup=reply_markup, parse_mode='HTML')
+        await update.callback_query.edit_message_text(msg, reply_markup=reply_markup, parse_mode='HTML', disable_web_page_preview=True)
     else:
-        await update.message.reply_text(s["choose_product"], reply_markup=reply_markup, parse_mode='HTML')
+        await update.message.reply_text(msg, reply_markup=reply_markup, parse_mode='HTML', disable_web_page_preview=True)
+
+async def _show_product_details(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, p_id: int, lang: str, edit_message=False):
+    s = strings.STRINGS[lang]
+    product = db.get_product(p_id)
+    if not product:
+        if edit_message:
+            await update.callback_query.edit_message_text("Product not found.")
+        else:
+            await update.message.reply_text("Product not found.")
+        return
+
+    title = product["title_ru"] if lang == "ru" else product["title_en"]
+    desc = product["desc_ru"] if lang == "ru" else product["desc_en"]
+    price = product["price_usd"]
+    stock = product["stock"]
+    
+    cat_id = product.get("category_id", None)
+    back_data = f"back_to_products_{cat_id}" if cat_id else "back_to_categories"
+    
+    if stock <= 0:
+        msg = s["out_of_stock_detailed"].format(name=title)
+        keyboard = [
+            [InlineKeyboardButton(s["btn_add_favorite"], callback_data=f"fav_{p_id}")],
+            [InlineKeyboardButton(s["btn_back"], callback_data=back_data)],
+            [InlineKeyboardButton(s["btn_back_categories"], callback_data="back_to_categories")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        if edit_message:
+            await update.callback_query.edit_message_text(msg, reply_markup=reply_markup, parse_mode="HTML")
+        else:
+            await update.message.reply_text(msg, reply_markup=reply_markup, parse_mode="HTML")
+        return
+        
+    text = f"<b>{title}</b>\n\n{desc}\n\nPrice: ${price}\nStock: {stock}"
+    
+    keyboard = [
+        [InlineKeyboardButton(s["buy_button"].format(price=price), callback_data=f"buy_{p_id}")],
+        [InlineKeyboardButton(s["btn_back"], callback_data=back_data)] 
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if edit_message:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
 async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
     await _send_category_list(update, context, lang, edit_message=False)
@@ -482,38 +558,7 @@ async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
     elif data.startswith("prod_"):
         p_id = int(data.split("_")[1])
-        product = db.get_product(p_id)
-        if not product:
-            await query.edit_message_text("Product not found.")
-            return
-
-        title = product["title_ru"] if lang == "ru" else product["title_en"]
-        desc = product["desc_ru"] if lang == "ru" else product["desc_en"]
-        price = product["price_usd"]
-        stock = product["stock"]
-        
-        # We need the product category to return back correctly
-        cat_id = product.get("category_id", None)
-        back_data = f"back_to_products_{cat_id}" if cat_id else "back_to_categories"
-        
-        if stock <= 0:
-            # Out of stock flow
-            msg = s["out_of_stock_detailed"].format(name=title)
-            keyboard = [
-                [InlineKeyboardButton(s["btn_add_favorite"], callback_data=f"fav_{p_id}")],
-                [InlineKeyboardButton(s["btn_back"], callback_data=back_data)],
-                [InlineKeyboardButton(s["btn_back_categories"], callback_data="back_to_categories")]
-            ]
-            await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-            return
-            
-        text = f"<b>{title}</b>\n\n{desc}\n\nPrice: ${price}\nStock: {stock}"
-        
-        keyboard = [
-            [InlineKeyboardButton(s["buy_button"].format(price=price), callback_data=f"buy_{p_id}")],
-            [InlineKeyboardButton(s["btn_back"], callback_data=back_data)] 
-        ]
-        await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        await _show_product_details(update, context, user_id, p_id, lang, edit_message=True)
         
     elif data.startswith("fav_"):
         p_id = int(data.split("_")[1])
