@@ -396,7 +396,7 @@ async def _send_all_products_grouped(update: Update, context: ContextTypes.DEFAU
     s = strings.STRINGS[lang]
     
     if not categories:
-        msg = s.get("no_categories", "No categories available.")
+        msg = s.get("no_categories", "📦 No products available yet.")
         if update.callback_query:
             try:
                 await update.callback_query.edit_message_text(msg)
@@ -445,7 +445,7 @@ async def _send_all_products_grouped(update: Update, context: ContextTypes.DEFAU
         blocks.append(block)
         
     if not has_any_products:
-        msg = s.get("no_products", "No products available at the moment.")
+        msg = s.get("no_products", "📦 No products available yet.")
         if update.callback_query:
             try:
                 await update.callback_query.edit_message_text(msg)
