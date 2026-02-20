@@ -53,6 +53,22 @@ async def deliver_order(order_id: int, bot):
 
     try:
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        stock_id = order.get('stock_id')
+        
+        if not stock_id:
+            await bot.send_message(chat_id=user_id, text=msg_no_code)
+            print(f"[DELIVERY] Order {order_id} missing stock_id")
+            return False
+            
+        stock_item = db.get_stock_item(stock_id)
+        if not stock_item:
+            await bot.send_message(chat_id=user_id, text=msg_no_code)
+            print(f"[DELIVERY] Stock item {stock_id} NOT FOUND!")
+            return False
+
+        delivery_type = stock_item['type']
+        value = stock_item['content']
+        file_id = stock_item['file_id']
 
         # 2. Perform Delivery
         if delivery_type == 'link':
@@ -60,31 +76,23 @@ async def deliver_order(order_id: int, bot):
             db.update_order_delivery(order_id, 'link', value, None, now_str)
             
         elif delivery_type == 'file':
-            await bot.send_document(chat_id=user_id, document=value, caption=msg_done)
-            db.update_order_delivery(order_id, 'file', value, title, now_str)
+            await bot.send_document(chat_id=user_id, document=file_id, caption=msg_done)
+            db.update_order_delivery(order_id, 'file', file_id, title, now_str)
             
         elif delivery_type == 'code':
-            code_row = db.get_unused_code(product_id)
-            if code_row:
-                # Mark used
-                db.mark_code_as_used(code_row['id'], user_id)
-                # Remove from stock if it hasn't been done (Code products stock management is usually implicit by count of codes, but we also have 'stock' column)
-                # In current logic, stock is decreased at order creation (reservation).
-                # But for codes, we need to pick a SPECIFIC code.
-                
-                code_text = code_row['code']
-                await bot.send_message(
-                    chat_id=user_id, 
-                    text=f"{msg_done}\n\n<code>{code_text}</code>", 
-                    parse_mode='HTML'
-                )
-                db.update_order_delivery(order_id, 'code', code_text, None, now_str)
-            else:
-                await bot.send_message(chat_id=user_id, text=msg_no_code)
-                print(f"[DELIVERY] No codes for product {product_id}")
-                return False
+            await bot.send_message(
+                chat_id=user_id, 
+                text=f"{msg_done}\n\n<code>{value}</code>", 
+                parse_mode='HTML'
+            )
+            db.update_order_delivery(order_id, 'code', value, None, now_str)
+            
+        else:
+             print(f"[DELIVERY] Unknown type {delivery_type}")
+             return False
 
         # 3. Update DB
+        db.mark_stock_item_sold(stock_id)
         db.update_order_status(order_id, 'delivered')
         print(f"[DELIVERY] Order {order_id} marked as delivered")
         return True

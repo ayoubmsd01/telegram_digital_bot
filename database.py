@@ -120,13 +120,47 @@ def init_db():
             joined_at TEXT
         )
     ''')
+
+    # Categories Table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS categories (
+            category_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            name_ru TEXT NOT NULL,
+            name_en TEXT NOT NULL,
+            sort_order INTEGER DEFAULT 0,
+            is_active INTEGER DEFAULT 1
+        )
+    ''')
+
+    # Stock Items Table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS stock_items (
+            stock_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            product_id INTEGER NOT NULL,
+            type TEXT NOT NULL,
+            content TEXT,
+            file_id TEXT,
+            status TEXT DEFAULT 'available',
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(product_id) REFERENCES products(product_id)
+        )
+    ''')
     
-    # Migration for users table (if older version exists)
+    # Migrations for existing tables
     try:
         c.execute("ALTER TABLE users ADD COLUMN username TEXT")
     except: pass
     try:
         c.execute("ALTER TABLE users ADD COLUMN joined_at TEXT")
+    except: pass
+    try:
+        c.execute("ALTER TABLE products ADD COLUMN category_id INTEGER DEFAULT 0")
+    except: pass
+    try:
+        c.execute("ALTER TABLE products ADD COLUMN is_active INTEGER DEFAULT 1")
+    except: pass
+    try:
+        c.execute("ALTER TABLE orders ADD COLUMN stock_id INTEGER DEFAULT 0")
     except: pass
 
     # Settings table
@@ -490,21 +524,160 @@ def add_admin_adjustment(admin_id, user_id, amount, note=None):
     conn.commit()
     conn.close()
 
-def get_products():
+def get_products(category_id=None, only_active=True):
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute('SELECT * FROM products')
+    
+    query = '''
+        SELECT p.*, 
+               (SELECT COUNT(*) FROM stock_items WHERE product_id = p.product_id AND status='available') as real_stock
+        FROM products p
+        WHERE 1=1
+    '''
+    params = []
+    
+    if only_active:
+        query += " AND p.is_active = 1"
+    if category_id is not None:
+        query += " AND p.category_id = ?"
+        params.append(category_id)
+        
+    cursor.execute(query, tuple(params))
+    rows = cursor.fetchall()
+    conn.close()
+    
+    products = []
+    for row in rows:
+        d = dict(row)
+        d['stock'] = d['real_stock']
+        products.append(d)
+    return products
+
+def get_product(product_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT p.*, 
+               (SELECT COUNT(*) FROM stock_items WHERE product_id = p.product_id AND status='available') as real_stock
+        FROM products p 
+        WHERE p.product_id = ?
+    ''', (product_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if row:
+        d = dict(row)
+        d['stock'] = d['real_stock']
+        return d
+    return None
+
+def add_category(name_ru, name_en):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('INSERT INTO categories (name_ru, name_en) VALUES (?, ?)', (name_ru, name_en))
+    cat_id = cursor.lastrowid
+    conn.commit()
+    conn.close()
+    return cat_id
+
+def get_categories(only_active=True):
+    conn = get_connection()
+    cursor = conn.cursor()
+    query = 'SELECT * FROM categories'
+    if only_active:
+        query += ' WHERE is_active = 1'
+    query += ' ORDER BY sort_order, category_id'
+    cursor.execute(query)
     rows = cursor.fetchall()
     conn.close()
     return [dict(row) for row in rows]
 
+def get_category(category_id):
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM categories WHERE category_id = ?', (category_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
 
-def create_order(user_id, product_id, invoice_id, price_usd=0.0, used_balance=0.0, need_crypto=0.0):
+def add_stock_item(product_id, type_str, content=None, file_id=None):
+    """Add a single stock item."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        INSERT INTO stock_items (product_id, type, content, file_id, status)
+        VALUES (?, ?, ?, ?, 'available')
+    ''', (product_id, type_str, content, file_id))
+    conn.commit()
+    conn.close()
+    return True
+
+def add_stock_items_bulk(product_id, type_str, contents_list):
+    """Add multiple stock items (usually codes)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    data = [(product_id, type_str, c.strip(), None, 'available') for c in contents_list if c.strip()]
+    cursor.executemany('''
+        INSERT INTO stock_items (product_id, type, content, file_id, status)
+        VALUES (?, ?, ?, ?, ?)
+    ''', data)
+    count = cursor.rowcount
+    conn.commit()
+    conn.close()
+    return count
+
+def reserve_stock_item(product_id):
+    """Reserves one stock item for a product and returns it."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('''
+        SELECT stock_id, type, content, file_id 
+        FROM stock_items 
+        WHERE product_id = ? AND status = 'available' 
+        LIMIT 1
+    ''', (product_id,))
+    row = cursor.fetchone()
+    if not row:
+        conn.close()
+        return None
+        
+    stock_id = row['stock_id']
+    cursor.execute("UPDATE stock_items SET status = 'reserved' WHERE stock_id = ?", (stock_id,))
+    conn.commit()
+    conn.close()
+    return dict(row)
+
+def release_stock_item(stock_id):
+    """Release a reserved stock item back to available."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE stock_items SET status = 'available' WHERE stock_id = ?", (stock_id,))
+    conn.commit()
+    conn.close()
+
+def mark_stock_item_sold(stock_id):
+    """Mark a stock item as sold."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("UPDATE stock_items SET status = 'sold' WHERE stock_id = ?", (stock_id,))
+    conn.commit()
+    conn.close()
+
+def get_stock_item(stock_id):
+    """Get a stock item by its ID."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM stock_items WHERE stock_id = ?", (stock_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+
+def create_order(user_id, product_id, invoice_id, price_usd=0.0, used_balance=0.0, need_crypto=0.0, stock_id=0):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute(
-        'INSERT INTO orders (user_id, product_id, invoice_id, price_usd, status, used_balance, need_crypto) VALUES (?, ?, ?, ?, ?, ?, ?)',
-        (user_id, product_id, invoice_id, price_usd, 'pending', used_balance, need_crypto)
+        'INSERT INTO orders (user_id, product_id, invoice_id, price_usd, status, used_balance, need_crypto, stock_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+        (user_id, product_id, invoice_id, price_usd, 'pending', used_balance, need_crypto, stock_id)
     )
     order_id = cursor.lastrowid
     conn.commit()
@@ -579,12 +752,15 @@ def cancel_order_db(order_id):
     conn = get_connection()
     cursor = conn.cursor()
     # Get order info to restore stock and refund balance
-    cursor.execute('SELECT product_id, status, user_id, used_balance FROM orders WHERE order_id = ?', (order_id,))
+    cursor.execute('SELECT product_id, status, user_id, used_balance, stock_id FROM orders WHERE order_id = ?', (order_id,))
     row = cursor.fetchone()
     if row and row['status'] == 'pending':
         cursor.execute("UPDATE orders SET status = 'canceled' WHERE order_id = ?", (order_id,))
         # Increase stock back
-        cursor.execute('UPDATE products SET stock = stock + 1 WHERE product_id = ?', (row['product_id'],))
+        stock_id = row['stock_id']
+        if stock_id:
+            cursor.execute("UPDATE stock_items SET status = 'available' WHERE stock_id = ?", (stock_id,))
+            
         # Refund used_balance back to user
         used_bal = row['used_balance'] or 0
         if used_bal > 0:
@@ -679,16 +855,6 @@ if __name__ == "__main__":
     init_db()
     seed_products()
 
-def get_product(product_id):
-    """Get a single product by ID."""
-    conn = get_connection()
-    cursor = conn.cursor()
-    cursor.execute('SELECT * FROM products WHERE product_id = ?', (product_id,))
-    row = cursor.fetchone()
-    conn.close()
-    if row:
-        return dict(row)
-    return None
 
 def increment_stock(product_id, qty):
     """Increment product stock by qty. Returns True if stock was 0 before."""

@@ -78,9 +78,9 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         return
     
     keyboard = [
-        ["➕ Add Product", "✏️ Edit Product"],
-        ["🗑️ Delete Product", "📦 Manage Stock"],
-        ["🔑 Manage Codes", "📊 Recent Orders"],
+        ["➕ Add Category", "🗂 Manage Categories"],
+        ["➕ Add Product/Stock", "✏️ Edit Product"],
+        ["🗑️ Delete Product", "📊 Recent Orders"],
         ["👥 Users Stats", "🚫 Ban Management"],
         ["➕ Add Balance", "⬅️ Back"]
     ]
@@ -327,7 +327,7 @@ async def edit_product_selected(update: Update, context: ContextTypes.DEFAULT_TY
         context.user_data['edit_product_id'] = product_id
         
         keyboard = [
-            ["Price"], ["Stock"], ["Title EN"], ["Title RU"],
+            ["Price"], ["Title EN"], ["Title RU"],
             ["Desc EN"], ["Desc RU"], ["Cancel"]
         ]
         
@@ -350,7 +350,6 @@ async def edit_field_selected(update: Update, context: ContextTypes.DEFAULT_TYPE
     
     field_map = {
         "Price": "price_usd",
-        "Stock": "stock",
         "Title EN": "title_en",
         "Title RU": "title_ru",
         "Desc EN": "desc_en",
@@ -389,25 +388,9 @@ async def edit_new_value_received(update: Update, context: ContextTypes.DEFAULT_
         except ValueError:
             await update.message.reply_text(f"❌ Invalid number: '{new_value_str}'. Please enter a valid price (e.g. 5.99).")
             return EDIT_NEW_VALUE
-    elif field == 'stock':
-        try:
-            new_value = int(float(new_value_str))
-        except ValueError:
-            await update.message.reply_text(f"❌ Invalid number: '{new_value_str}'. Please enter a valid integer.")
-            return EDIT_NEW_VALUE
-    
-   # Update in database
-    old_stock = 0
-    if field == 'stock':
-        product = db.get_product(product_id)
-        if product:
-            old_stock = product['stock']
-
+    # Update in database
     db.update_product_field(product_id, field, new_value)
     
-    if field == 'stock' and old_stock == 0 and new_value > 0:
-        await trigger_restock_notifications(product_id, context)
-        
     await update.message.reply_text(f"✅ Product updated!\n{field} = {new_value}")
     context.user_data.clear()
     return ConversationHandler.END

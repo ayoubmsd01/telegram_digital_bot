@@ -378,17 +378,44 @@ async def topup_check_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.error(f"Topup check error: {e}")
         await query.message.reply_text(s["topup_not_paid"])
 
-async def _send_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, edit_message=False):
+async def _send_category_list(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, edit_message=False):
+    """Helper to send the new formatted list of categories."""
+    categories = db.get_categories(only_active=True)
+    s = strings.STRINGS[lang]
+    
+    if not categories:
+        # Fallback if no categories, directly show products
+        await _send_product_list(update, context, lang, category_id=None, edit_message=edit_message)
+        return
+
+    keyboard = []
+    for c in categories:
+        c_id = c["category_id"]
+        name = c["name_ru"] if lang == "ru" else c["name_en"]
+        keyboard.append([InlineKeyboardButton(f"📁 {name}", callback_data=f"cat_{c_id}")])
+    
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    msg_text = s.get("choose_category", "🗂 <b>Categories:</b>")
+    
+    if edit_message:
+        await update.callback_query.edit_message_text(msg_text, reply_markup=reply_markup, parse_mode='HTML')
+    else:
+        await update.message.reply_text(msg_text, reply_markup=reply_markup, parse_mode='HTML')
+
+async def _send_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, category_id: int = None, edit_message=False):
     """Helper to send the new formatted list of products."""
-    products = db.get_products()
+    products = db.get_products(category_id=category_id, only_active=True)
     s = strings.STRINGS[lang]
     
     if not products:
-        msg = "No products available."
+        msg = "No products available in this category."
+        keyboard = [[InlineKeyboardButton(s.get("btn_back_categories", "⬅️ Back"), callback_data="back_to_categories")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         if edit_message:
-            await update.callback_query.edit_message_text(msg)
+            await update.callback_query.edit_message_text(msg, reply_markup=reply_markup)
         else:
-            await update.message.reply_text(msg)
+            await update.message.reply_text(msg, reply_markup=reply_markup)
         return
 
     keyboard = []
@@ -399,21 +426,21 @@ async def _send_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE,
         stock = p["stock"]
         
         # New format: Name | Price$ | Stock шт.
-        # Ensure it fits well on screens
         stock_text = f"{stock} шт." if lang == "ru" else f"{stock} pcs."
         btn_text = f"{title} | {price:.2f}$ | {stock_text}"
         keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"prod_{p_id}")])
     
+    # Add back button to categories
+    keyboard.append([InlineKeyboardButton(s.get("btn_back_categories", "⬅️ Back to categories"), callback_data="back_to_categories")])
     reply_markup = InlineKeyboardMarkup(keyboard)
     
-    # Send or Edit
     if edit_message:
         await update.callback_query.edit_message_text(s["choose_product"], reply_markup=reply_markup, parse_mode='HTML')
     else:
         await update.message.reply_text(s["choose_product"], reply_markup=reply_markup, parse_mode='HTML')
 
 async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
-    await _send_product_list(update, context, lang, edit_message=False)
+    await _send_category_list(update, context, lang, edit_message=False)
 
 async def show_stock(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
     # Check Published Stock Update (Alert) First
@@ -433,7 +460,7 @@ async def show_stock(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: s
     except Exception as e:
         print(f"Error sending stock update: {e}")
 
-    await _send_product_list(update, context, lang, edit_message=False)
+    await _send_category_list(update, context, lang, edit_message=False)
 
 async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -447,7 +474,11 @@ async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     lang = db.get_user_language(user_id) or "en"
     s = strings.STRINGS[lang]
 
-    if data.startswith("prod_"):
+    if data.startswith("cat_"):
+        c_id = int(data.split("_")[1])
+        await _send_product_list(update, context, lang, category_id=c_id, edit_message=True)
+
+    elif data.startswith("prod_"):
         p_id = int(data.split("_")[1])
         product = db.get_product(p_id)
         if not product:
@@ -459,13 +490,17 @@ async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         price = product["price_usd"]
         stock = product["stock"]
         
+        # We need the product category to return back correctly
+        cat_id = product.get("category_id", None)
+        back_data = f"back_to_products_{cat_id}" if cat_id else "back_to_categories"
+        
         if stock <= 0:
             # Out of stock flow
             msg = s["out_of_stock_detailed"].format(name=title)
             keyboard = [
                 [InlineKeyboardButton(s["btn_add_favorite"], callback_data=f"fav_{p_id}")],
-                [InlineKeyboardButton(s["btn_back"], callback_data="back_to_products")],
-                [InlineKeyboardButton(s["btn_back_categories"], callback_data="back_to_categories")] # If you have categories, else just fallback to products
+                [InlineKeyboardButton(s["btn_back"], callback_data=back_data)],
+                [InlineKeyboardButton(s["btn_back_categories"], callback_data="back_to_categories")]
             ]
             await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
             return
@@ -474,23 +509,23 @@ async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         
         keyboard = [
             [InlineKeyboardButton(s["buy_button"].format(price=price), callback_data=f"buy_{p_id}")],
-            [InlineKeyboardButton(s["btn_back"], callback_data="back_to_products")] 
+            [InlineKeyboardButton(s["btn_back"], callback_data=back_data)] 
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
         
     elif data.startswith("fav_"):
         p_id = int(data.split("_")[1])
         db.add_favorite(user_id, p_id)
-        await query.answer(s["favorite_added_success"], show_alert=True)
-        # Keep same message but can optionally change the button to "✅ Added"
+        await query.answer(s.get("favorite_added_success", "Added to favorites!"), show_alert=True)
 
     elif data == "back_to_categories":
-        # Placeholder for categories if added in future. For now acts like back_to_products
-        await _send_product_list(update, context, lang, edit_message=True)
+        await _send_category_list(update, context, lang, edit_message=True)
 
-    elif data == "back_to_products":
-        # Re-show product lists formatted
-        await _send_product_list(update, context, lang, edit_message=True)
+    elif data.startswith("back_to_products"):
+        # Could be "back_to_products_None" or "back_to_products_{id}"
+        parts = data.split("_")
+        c_id = int(parts[3]) if len(parts) > 3 and parts[3] != 'None' else None
+        await _send_product_list(update, context, lang, category_id=c_id, edit_message=True)
         
     elif data.startswith("buy_"):
         p_id = int(data.split("_")[1])
@@ -508,9 +543,16 @@ async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if user_balance >= price:
             # Full balance purchase
             if db.deduct_user_balance(user_id, price):
-                db.decrease_stock(p_id)
-                # Create order with 0 invoice id
-                order_id = db.create_order(user_id, p_id, 0, price, used_balance=price, need_crypto=0.0)
+                stock_item = db.reserve_stock_item(p_id)
+                if not stock_item:
+                    # Race condition: ran out of stock
+                    db.add_user_balance(user_id, price)
+                    await query.message.reply_text(s.get("out_of_stock_detailed", "Out of stock.").format(name=title))
+                    return
+
+                stock_id = stock_item['stock_id']
+                # Create order with stock_id
+                order_id = db.create_order(user_id, p_id, 0, price, used_balance=price, need_crypto=0.0, stock_id=stock_id)
                 db.update_order_status(order_id, 'paid')
                 
                 import datetime as dt
@@ -533,14 +575,19 @@ async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
             used_balance = user_balance
             need_crypto = price - user_balance
 
-        # Decrease Stock immediately (Reservation)
-        db.decrease_stock(p_id)
+        # Reserve Stock immediately
+        stock_item = db.reserve_stock_item(p_id)
+        if not stock_item:
+            await query.message.reply_text(s.get("out_of_stock_detailed", "Out of stock.").format(name=title))
+            return
+            
+        stock_id = stock_item['stock_id']
 
         # Deduct available balance
         if used_balance > 0:
             if not db.deduct_user_balance(user_id, used_balance):
                 # Race condition: balance became unavailable
-                db.increase_stock(p_id)
+                db.release_stock_item(stock_id)
                 await query.message.reply_text(s["topup_error"])
                 return
 
@@ -558,7 +605,7 @@ async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 pay_url = result.get("bot_invoice_url") or result.get("pay_url") or result.get("mini_app_invoice_url", "")
                 
                 # Create Order in DB
-                order_id = db.create_order(user_id, p_id, invoice_id, price, used_balance=used_balance, need_crypto=need_crypto)
+                order_id = db.create_order(user_id, p_id, invoice_id, price, used_balance=used_balance, need_crypto=need_crypto, stock_id=stock_id)
                 
                 if used_balance > 0:
                     msg_text = s["buy_partial_balance"].format(
@@ -583,33 +630,20 @@ async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
                 await query.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
             else:
                 # Failed to create invoice, restore stock and balance
-                db.increase_stock(p_id)
+                db.release_stock_item(stock_id)
                 if used_balance > 0:
                     db.add_user_balance(user_id, used_balance)
                 logger.error(f"Invoice creation failed: {invoice}")
                 await query.message.reply_text("Error creating invoice. Please try again.")
         except Exception as e:
             # Restore stock and balance on error
-            db.increase_stock(p_id)
+            db.release_stock_item(stock_id)
             if used_balance > 0:
                 db.add_user_balance(user_id, used_balance)
             logger.error(f"Error: {e}")
             await query.message.reply_text("System error.")
 
-    elif data == "back_to_products":
-        # Re-show product lists
-        products = db.get_products()
-        keyboard = []
-        for p in products:
-            p_id = p["product_id"]
-            title = p["title_ru"] if lang == "ru" else p["title_en"]
-            price = p["price_usd"]
-            stock = p["stock"]
-            if stock > 0:
-                btn_text = f"{title} - ${price}"
-                keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"prod_{p_id}")])
-        
-        await query.edit_message_text(s["choose_product"], reply_markup=InlineKeyboardMarkup(keyboard))
+
 
 async def cancel_order_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if is_user_banned(update):
@@ -756,30 +790,12 @@ def main() -> None:
     # Register global error handler to prevent crashes
     application.add_error_handler(error_handler)
 
-    # Add Product ConversationHandler
-    add_product_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^➕ Add Product$"), admin_handlers.start_add_product)],
-        states={
-            admin_handlers.CHOOSING_TYPE: [MessageHandler(filters.TEXT, admin_handlers.product_type_chosen)],
-            admin_handlers.TITLE_EN: [MessageHandler(filters.TEXT, admin_handlers.title_en_received)],
-            admin_handlers.TITLE_RU: [MessageHandler(filters.TEXT, admin_handlers.title_ru_received)],
-            admin_handlers.DESC_EN: [MessageHandler(filters.TEXT, admin_handlers.desc_en_received)],
-            admin_handlers.DESC_RU: [MessageHandler(filters.TEXT, admin_handlers.desc_ru_received)],
-            admin_handlers.PRICE: [MessageHandler(filters.TEXT, admin_handlers.price_received)],
-            admin_handlers.STOCK: [MessageHandler(filters.TEXT, admin_handlers.stock_received)],
-            admin_handlers.DELIVERY_VALUE: [
-                MessageHandler((filters.TEXT | filters.Document.ALL | filters.PHOTO | filters.VIDEO) & ~filters.COMMAND, 
-                              admin_handlers.delivery_value_received)
-            ],
-            admin_handlers.CODES_INPUT: [MessageHandler(filters.TEXT, admin_handlers.codes_received)],
-        },
-        fallbacks=[
-            MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation),
-            CommandHandler(["start", "admin", "ad"], command_fallback)
-        ],
-    )
+    import admin_categories
     
-    application.add_handler(add_product_handler)
+    # New Handlers
+    application.add_handler(admin_categories.add_category_conv)
+    application.add_handler(admin_categories.add_product_stock_conv)
+    application.add_handler(MessageHandler(filters.Regex("^🗂 Manage Categories$"), admin_categories.list_categories))
 
     # Edit Product ConversationHandler
     edit_product_handler = ConversationHandler(
@@ -809,35 +825,6 @@ def main() -> None:
         ],
     )
     application.add_handler(delete_product_handler)
-
-    # Manage Stock ConversationHandler
-    manage_stock_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^📦 Manage Stock$"), admin_handlers.start_manage_stock)],
-        states={
-            admin_handlers.STOCK_SELECT_PRODUCT: [MessageHandler(filters.TEXT, admin_handlers.stock_product_selected)],
-            admin_handlers.STOCK_ENTER_QTY: [MessageHandler(filters.TEXT, admin_handlers.stock_qty_received)],
-            admin_handlers.STOCK_ENTER_CODES: [MessageHandler(filters.TEXT, admin_handlers.stock_codes_received)],
-        },
-        fallbacks=[
-            MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation),
-            CommandHandler(["start", "admin", "ad"], command_fallback)
-        ],
-    )
-    application.add_handler(manage_stock_handler)
-
-    # Manage Codes ConversationHandler
-    manage_codes_handler = ConversationHandler(
-        entry_points=[MessageHandler(filters.Regex("^🔑 Manage Codes$"), admin_handlers.start_manage_codes)],
-        states={
-            admin_handlers.CODES_SELECT_PRODUCT: [MessageHandler(filters.TEXT, admin_handlers.codes_product_selected)],
-            admin_handlers.CODES_ADD_NEW: [MessageHandler(filters.TEXT, admin_handlers.codes_add_new_received)],
-        },
-        fallbacks=[
-            MessageHandler(filters.Regex("^(Cancel|Отмена)$"), admin_handlers.cancel_conversation),
-            CommandHandler(["start", "admin", "ad"], command_fallback)
-        ],
-    )
-    application.add_handler(manage_codes_handler)
 
     # Recent Orders Handler
     application.add_handler(MessageHandler(filters.Regex("^📊 Recent Orders$"), admin_handlers.show_recent_orders))
