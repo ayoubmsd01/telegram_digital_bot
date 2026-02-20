@@ -92,7 +92,7 @@ async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
     lang = query.data.split("_")[1]
     user = query.from_user
     username = str(user.username) if user.username else str(user.first_name)
-    db.add_user(user_id, lang, username)
+    db.add_user(user.id, lang, username)
     
     await query.edit_message_text(text=f"Language set to {lang.upper()}")
     await show_main_menu(update, context, lang)
