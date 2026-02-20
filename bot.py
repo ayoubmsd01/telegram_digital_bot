@@ -524,8 +524,282 @@ async def _show_product_details(update: Update, context: ContextTypes.DEFAULT_TY
     else:
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
+async def _execute_buy_flow(update: Update, context: ContextTypes.DEFAULT_TYPE, p_id: int, user_id: int, lang: str, query):
+    s = strings.STRINGS[lang]
+    product = db.get_product(p_id)
+    
+    if not product or product["stock"] <= 0:
+        await query.message.reply_text(s.get("out_of_stock_detailed", "Out of stock.").format(name=product["title_en"] if product else "Unknown"))
+        return
+
+    price = product["price_usd"]
+    user_balance = db.get_user_balance(user_id)
+    title = product["title_ru"] if lang == "ru" else product["title_en"]
+
+    # Strategy
+    if user_balance >= price:
+        # Full balance purchase
+        if db.deduct_user_balance(user_id, price):
+            stock_item = db.reserve_stock_item(p_id)
+            if not stock_item:
+                # Race condition: ran out of stock
+                db.add_user_balance(user_id, price)
+                await query.message.reply_text(s.get("out_of_stock_detailed", "Out of stock.").format(name=title))
+                return
+
+            stock_id = stock_item['stock_id']
+            # Create order with stock_id
+            order_id = db.create_order(user_id, p_id, 0, price, used_balance=price, need_crypto=0.0, stock_id=stock_id)
+            db.update_order_status(order_id, 'paid')
+            
+            import datetime as dt
+            db.update_order_payment(order_id, price, "BALANCE", dt.datetime.now().isoformat())
+            
+            msg = s["buy_full_balance"].replace("{price}", f"{price:.2f}")
+            await query.message.reply_text(msg, parse_mode="HTML")
+            
+            # Deliver
+            await delivery_service.deliver_order(order_id, context.bot)
+        else:
+            await query.message.reply_text(s["topup_error"])
+        return
+
+    # Partial or no balance
+    need_crypto = price
+    used_balance = 0.0
+    
+    if user_balance > 0:
+        used_balance = user_balance
+        need_crypto = price - user_balance
+
+    # Reserve Stock immediately
+    stock_item = db.reserve_stock_item(p_id)
+    if not stock_item:
+        await query.message.reply_text(s.get("out_of_stock_detailed", "Out of stock.").format(name=title))
+        return
+        
+    stock_id = stock_item['stock_id']
+
+    # Deduct available balance
+    if used_balance > 0:
+        if not db.deduct_user_balance(user_id, used_balance):
+            # Race condition: balance became unavailable
+            db.release_stock_item(stock_id)
+            await query.message.reply_text(s["topup_error"])
+            return
+
+    try:
+        invoice = create_invoice(
+            amount=need_crypto,
+            currency="USD",
+            description=f"Buying {product['title_en']}",
+            payload=f"{user_id}:{p_id}" 
+        )
+        
+        if invoice and invoice.get("ok"):
+            result = invoice["result"]
+            invoice_id = result["invoice_id"]
+            pay_url = result.get("bot_invoice_url") or result.get("pay_url") or result.get("mini_app_invoice_url", "")
+            
+            # Create Order in DB
+            order_id = db.create_order(user_id, p_id, invoice_id, price, used_balance=used_balance, need_crypto=need_crypto, stock_id=stock_id)
+            
+            if used_balance > 0:
+                msg_text = s["buy_partial_balance"].format(
+                    invoice_id=invoice_id,
+                    title=title,
+                    used_balance=f"${used_balance:.2f}",
+                    need_crypto=f"${need_crypto:.2f}"
+                )
+            else:
+                msg_text = s["buy_no_balance"].format(
+                    invoice_id=invoice_id,
+                    title=title,
+                    price=f"${price:.2f}"
+                )
+            
+            check_btn_text = "✅ Check Payment" if lang != "ru" else "✅ Проверить оплату"
+            keyboard = [
+                [InlineKeyboardButton(s["pay_link"], url=pay_url)],
+                [InlineKeyboardButton(check_btn_text, callback_data=f"checkpay:{order_id}")],
+                [InlineKeyboardButton("❌ Cancel Order / Отменить", callback_data=f"cancel_{order_id}_{invoice_id}")]
+            ]
+            await query.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        else:
+            # Failed to create invoice, restore stock and balance
+            db.release_stock_item(stock_id)
+            if used_balance > 0:
+                db.add_user_balance(user_id, used_balance)
+            logger.error(f"Invoice creation failed: {invoice}")
+            await query.message.reply_text("Error creating invoice. Please try again.")
+    except Exception as e:
+        # Restore stock and balance on error
+        db.release_stock_item(stock_id)
+        if used_balance > 0:
+            db.add_user_balance(user_id, used_balance)
+        logger.error(f"Error: {e}")
+        await query.message.reply_text("System error.")
+
+
+async def _send_products_flow_category_list(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, edit_message=False):
+    '''Helper to send the list of categories for the Products flow.'''
+    categories = db.get_categories(only_active=True)
+    s = strings.STRINGS[lang]
+    
+    if not categories:
+        msg = s.get("no_categories", "📦 В наличии пока нет товаров.")
+        if edit_message:
+            await update.callback_query.edit_message_text(msg)
+        else:
+            await update.message.reply_text(msg)
+        return
+
+    keyboard = []
+    has_any = False
+    for c in categories:
+        c_id = c["category_id"]
+        products = db.get_products(category_id=c_id, only_active=True)
+        visible_products = [p for p in products if p["stock"] > 0]
+        if not visible_products:
+            continue
+        has_any = True
+        name = c["name_ru"] if lang == "ru" else c["name_en"]
+        keyboard.append([InlineKeyboardButton(f"📁 {name}", callback_data=f"prod_cat:{c_id}")])
+    
+    if not has_any:
+        msg = s.get("no_products", "📦 В наличии пока нет товаров.")
+        if edit_message:
+            await update.callback_query.edit_message_text(msg)
+        else:
+            await update.message.reply_text(msg)
+        return
+
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    msg_text = s.get("choose_category", "🗂 <b>Categories:</b>")
+    
+    if edit_message:
+        await update.callback_query.edit_message_text(msg_text, reply_markup=reply_markup, parse_mode='HTML')
+    else:
+        await update.message.reply_text(msg_text, reply_markup=reply_markup, parse_mode='HTML')
+
+async def _send_products_flow_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, category_id: int, edit_message=False):
+    products = db.get_products(category_id=category_id, only_active=True)
+    s = strings.STRINGS[lang]
+    
+    visible_products = [p for p in products if p["stock"] > 0]
+    
+    if not visible_products:
+        msg = s.get("no_products", "📦 В наличии пока нет товаров.")
+        keyboard = [[InlineKeyboardButton(s.get("btn_back", "⬅️ Back"), callback_data="prod_back_cats")]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        if edit_message:
+            await update.callback_query.edit_message_text(msg, reply_markup=reply_markup)
+        else:
+            await update.message.reply_text(msg, reply_markup=reply_markup)
+        return
+
+    keyboard = []
+    for p in visible_products:
+        p_id = p["product_id"]
+        title = p["title_ru"] if lang == "ru" else p["title_en"]
+        price = p["price_usd"]
+        stock = p["stock"]
+        
+        stock_text = f"{stock} шт." if lang == "ru" else f"{stock} pcs."
+        btn_text = f"{title} | {price:g}$ | {stock_text}"
+        keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"prod_item:{p_id}")])
+    
+    keyboard.append([InlineKeyboardButton(s.get("btn_back_categories", "⬅️ Back to categories") if lang == "en" else "⬅️ Назад к категориям", callback_data="prod_back_cats")])
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    if edit_message:
+        await update.callback_query.edit_message_text(s["choose_product"], reply_markup=reply_markup, parse_mode='HTML')
+    else:
+        await update.message.reply_text(s["choose_product"], reply_markup=reply_markup, parse_mode='HTML')
+
+async def _show_products_flow_product_details(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, p_id: int, lang: str, edit_message=False):
+    s = strings.STRINGS[lang]
+    product = db.get_product(p_id)
+    if not product:
+        msg = "Product not found."
+        if edit_message:
+            await update.callback_query.edit_message_text(msg)
+        else:
+            await update.message.reply_text(msg)
+        return
+
+    title = product["title_ru"] if lang == "ru" else product["title_en"]
+    desc = product["desc_ru"] if lang == "ru" else product["desc_en"]
+    price = product["price_usd"]
+    stock = product["stock"]
+    
+    cat_id = product.get("category_id", None)
+    back_data = f"prod_back_items:{cat_id}" if cat_id else "prod_back_cats"
+    
+    btn_back_to_cats = s.get("btn_back_categories", "⬅️ Back to categories") if lang == "en" else "⬅️ Назад к категориям"
+
+    if stock <= 0:
+        msg = s["out_of_stock_detailed"].format(name=title)
+        keyboard = [
+            [InlineKeyboardButton(s["btn_add_favorite"], callback_data=f"fav_{p_id}")],
+            [InlineKeyboardButton(s["btn_back"], callback_data=back_data)],
+            [InlineKeyboardButton(btn_back_to_cats, callback_data="prod_back_cats")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        if edit_message:
+            await update.callback_query.edit_message_text(msg, reply_markup=reply_markup, parse_mode="HTML")
+        else:
+            await update.message.reply_text(msg, reply_markup=reply_markup, parse_mode="HTML")
+        return
+        
+    text = f"<b>{title}</b>\n\n{desc}\n\nPrice: ${price:g}\nStock: {stock}"
+    buy_btn_text = s.get("buy_button", "Buy for ${price}").format(price=price) if "buy_button" in s else ("Купить" if lang == "ru" else "Buy")
+    
+    keyboard = [
+        [InlineKeyboardButton(buy_btn_text, callback_data=f"prod_buy:{p_id}")],
+        [InlineKeyboardButton(s["btn_back"], callback_data=back_data)],
+        [InlineKeyboardButton(btn_back_to_cats, callback_data="prod_back_cats")]
+    ]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    if edit_message:
+        await update.callback_query.edit_message_text(text, reply_markup=reply_markup, parse_mode="HTML")
+    else:
+        await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
+
+
+async def products_flow_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    
+    data = query.data
+    user_id = query.from_user.id
+    if is_user_banned(update):
+        return  # Silent ignore
+    
+    lang = db.get_user_language(user_id) or "en"
+    
+    if data.startswith("prod_cat:"):
+        c_id = int(data.split(":")[1])
+        await _send_products_flow_product_list(update, context, lang, category_id=c_id, edit_message=True)
+        
+    elif data.startswith("prod_item:"):
+        p_id = int(data.split(":")[1])
+        await _show_products_flow_product_details(update, context, user_id, p_id, lang, edit_message=True)
+        
+    elif data.startswith("prod_buy:"):
+        p_id = int(data.split(":")[1])
+        await _execute_buy_flow(update, context, p_id, user_id, lang, query)
+        
+    elif data == "prod_back_cats":
+        await _send_products_flow_category_list(update, context, lang, edit_message=True)
+        
+    elif data.startswith("prod_back_items:"):
+        c_id = int(data.split(":")[1])
+        await _send_products_flow_product_list(update, context, lang, category_id=c_id, edit_message=True)
+
+
 async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
-    await _send_all_products_grouped(update, context, lang)
+    await _send_products_flow_category_list(update, context, lang, edit_message=False)
 
 async def show_stock(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
     # Check Published Stock Update (Alert) First
@@ -577,119 +851,7 @@ async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         
     elif data.startswith("buy_"):
         p_id = int(data.split("_")[1])
-        product = db.get_product(p_id)
-        
-        if not product or product["stock"] <= 0:
-            await query.message.reply_text(s.get("out_of_stock_detailed", "Out of stock.").format(name=product["title_en"] if product else "Unknown"))
-            return
-
-        price = product["price_usd"]
-        user_balance = db.get_user_balance(user_id)
-        title = product["title_ru"] if lang == "ru" else product["title_en"]
-
-        # Strategy
-        if user_balance >= price:
-            # Full balance purchase
-            if db.deduct_user_balance(user_id, price):
-                stock_item = db.reserve_stock_item(p_id)
-                if not stock_item:
-                    # Race condition: ran out of stock
-                    db.add_user_balance(user_id, price)
-                    await query.message.reply_text(s.get("out_of_stock_detailed", "Out of stock.").format(name=title))
-                    return
-
-                stock_id = stock_item['stock_id']
-                # Create order with stock_id
-                order_id = db.create_order(user_id, p_id, 0, price, used_balance=price, need_crypto=0.0, stock_id=stock_id)
-                db.update_order_status(order_id, 'paid')
-                
-                import datetime as dt
-                db.update_order_payment(order_id, price, "BALANCE", dt.datetime.now().isoformat())
-                
-                msg = s["buy_full_balance"].replace("{price}", f"{price:.2f}")
-                await query.message.reply_text(msg, parse_mode="HTML")
-                
-                # Deliver
-                await delivery_service.deliver_order(order_id, context.bot)
-            else:
-                await query.message.reply_text(s["topup_error"])
-            return
-
-        # Partial or no balance
-        need_crypto = price
-        used_balance = 0.0
-        
-        if user_balance > 0:
-            used_balance = user_balance
-            need_crypto = price - user_balance
-
-        # Reserve Stock immediately
-        stock_item = db.reserve_stock_item(p_id)
-        if not stock_item:
-            await query.message.reply_text(s.get("out_of_stock_detailed", "Out of stock.").format(name=title))
-            return
-            
-        stock_id = stock_item['stock_id']
-
-        # Deduct available balance
-        if used_balance > 0:
-            if not db.deduct_user_balance(user_id, used_balance):
-                # Race condition: balance became unavailable
-                db.release_stock_item(stock_id)
-                await query.message.reply_text(s["topup_error"])
-                return
-
-        try:
-            invoice = create_invoice(
-                amount=need_crypto,
-                currency="USD",
-                description=f"Buying {product['title_en']}",
-                payload=f"{user_id}:{p_id}" 
-            )
-            
-            if invoice and invoice.get("ok"):
-                result = invoice["result"]
-                invoice_id = result["invoice_id"]
-                pay_url = result.get("bot_invoice_url") or result.get("pay_url") or result.get("mini_app_invoice_url", "")
-                
-                # Create Order in DB
-                order_id = db.create_order(user_id, p_id, invoice_id, price, used_balance=used_balance, need_crypto=need_crypto, stock_id=stock_id)
-                
-                if used_balance > 0:
-                    msg_text = s["buy_partial_balance"].format(
-                        invoice_id=invoice_id,
-                        title=title,
-                        used_balance=f"${used_balance:.2f}",
-                        need_crypto=f"${need_crypto:.2f}"
-                    )
-                else:
-                    msg_text = s["buy_no_balance"].format(
-                        invoice_id=invoice_id,
-                        title=title,
-                        price=f"${price:.2f}"
-                    )
-                
-                check_btn_text = "✅ Check Payment" if lang != "ru" else "✅ Проверить оплату"
-                keyboard = [
-                    [InlineKeyboardButton(s["pay_link"], url=pay_url)],
-                    [InlineKeyboardButton(check_btn_text, callback_data=f"checkpay:{order_id}")],
-                    [InlineKeyboardButton("❌ Cancel Order / Отменить", callback_data=f"cancel_{order_id}_{invoice_id}")]
-                ]
-                await query.message.reply_text(msg_text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
-            else:
-                # Failed to create invoice, restore stock and balance
-                db.release_stock_item(stock_id)
-                if used_balance > 0:
-                    db.add_user_balance(user_id, used_balance)
-                logger.error(f"Invoice creation failed: {invoice}")
-                await query.message.reply_text("Error creating invoice. Please try again.")
-        except Exception as e:
-            # Restore stock and balance on error
-            db.release_stock_item(stock_id)
-            if used_balance > 0:
-                db.add_user_balance(user_id, used_balance)
-            logger.error(f"Error: {e}")
-            await query.message.reply_text("System error.")
+        await _execute_buy_flow(update, context, p_id, user_id, lang, query)
 
 
 
@@ -892,6 +1054,7 @@ def main() -> None:
     application.add_handler(CommandHandler("debug_stock", admin_handlers.debug_stock_settings)) # Debug
     application.add_handler(CallbackQueryHandler(language_callback, pattern="^lang_"))
     application.add_handler(CallbackQueryHandler(product_callback, pattern="^(cat_|prod_|buy_|fav_|back_to_)"))
+    application.add_handler(CallbackQueryHandler(products_flow_callback, pattern="^prod_(cat:|item:|buy:|back_cats|back_items)"))
     application.add_handler(CallbackQueryHandler(cancel_order_callback, pattern="^cancel_"))
     application.add_handler(CallbackQueryHandler(check_pay_callback, pattern="^checkpay:"))
     application.add_handler(CallbackQueryHandler(admin_handlers.admin_publish_stock_callback, pattern="^admin_publish_stock$"))
