@@ -178,6 +178,18 @@ def init_db():
         c.execute("ALTER TABLE users ADD COLUMN balance REAL DEFAULT 0.0")
     except: pass
     
+    # Favorites table
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS favorites (
+            user_id INTEGER,
+            product_id INTEGER,
+            created_at TEXT NOT NULL,
+            PRIMARY KEY (user_id, product_id),
+            FOREIGN KEY(user_id) REFERENCES users(user_id),
+            FOREIGN KEY(product_id) REFERENCES products(product_id)
+        )
+    ''')
+    
     conn.commit()
     conn.close()
     
@@ -291,6 +303,39 @@ def update_user_name(user_id, username):
     cursor.execute('UPDATE users SET username = ? WHERE user_id = ?', (username, user_id))
     conn.commit()
     conn.close()
+
+def add_favorite(user_id, product_id):
+    """Add a product to user favorites. Ignore if already exists."""
+    import datetime as dt
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            'INSERT INTO favorites (user_id, product_id, created_at) VALUES (?, ?, ?)',
+            (user_id, product_id, dt.datetime.now().isoformat())
+        )
+        conn.commit()
+    except Exception:
+        pass # Already exists
+    conn.close()
+
+def check_favorite(user_id, product_id) -> bool:
+    """Check if a product is in user favorites."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT 1 FROM favorites WHERE user_id = ? AND product_id = ?', (user_id, product_id))
+    row = cursor.fetchone()
+    conn.close()
+    return bool(row)
+
+def get_product_favorites(product_id):
+    """Get all user_ids who favorited a specific product."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id FROM favorites WHERE product_id = ?', (product_id,))
+    rows = cursor.fetchall()
+    conn.close()
+    return [row['user_id'] for row in rows]
 
 def get_all_users():
     conn = get_connection()
@@ -646,12 +691,17 @@ def get_product(product_id):
     return None
 
 def increment_stock(product_id, qty):
-    """Increment product stock by qty."""
+    """Increment product stock by qty. Returns True if stock was 0 before."""
     conn = get_connection()
     cursor = conn.cursor()
+    cursor.execute('SELECT stock FROM products WHERE product_id = ?', (product_id,))
+    row = cursor.fetchone()
+    old_stock = row['stock'] if row else 0
+
     cursor.execute('UPDATE products SET stock = stock + ? WHERE product_id = ?', (qty, product_id))
     conn.commit()
     conn.close()
+    return old_stock == 0 and qty > 0
 
 def update_product_field(product_id, field, value):
     """Update a single field of a product."""

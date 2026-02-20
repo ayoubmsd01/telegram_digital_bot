@@ -378,12 +378,17 @@ async def topup_check_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.error(f"Topup check error: {e}")
         await query.message.reply_text(s["topup_not_paid"])
 
-async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
+async def _send_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, edit_message=False):
+    """Helper to send the new formatted list of products."""
     products = db.get_products()
     s = strings.STRINGS[lang]
     
     if not products:
-        await update.message.reply_text("No products available.")
+        msg = "No products available."
+        if edit_message:
+            await update.callback_query.edit_message_text(msg)
+        else:
+            await update.message.reply_text(msg)
         return
 
     keyboard = []
@@ -393,15 +398,25 @@ async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE, lang
         price = p["price_usd"]
         stock = p["stock"]
         
-        if stock > 0:
-            btn_text = f"{title} - ${price}"
-            keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"prod_{p_id}")])
+        # New format: Name | Price$ | Stock шт.
+        # Ensure it fits well on screens
+        stock_text = f"{stock} шт." if lang == "ru" else f"{stock} pcs."
+        btn_text = f"{title} | {price:.2f}$ | {stock_text}"
+        keyboard.append([InlineKeyboardButton(btn_text, callback_data=f"prod_{p_id}")])
     
     reply_markup = InlineKeyboardMarkup(keyboard)
-    await update.message.reply_text(s["choose_product"], reply_markup=reply_markup)
+    
+    # Send or Edit
+    if edit_message:
+        await update.callback_query.edit_message_text(s["choose_product"], reply_markup=reply_markup, parse_mode='HTML')
+    else:
+        await update.message.reply_text(s["choose_product"], reply_markup=reply_markup, parse_mode='HTML')
+
+async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    await _send_product_list(update, context, lang, edit_message=False)
 
 async def show_stock(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
-    # Check Published Stock Update
+    # Check Published Stock Update (Alert) First
     try:
         enabled = db.get_setting("stock_update_enabled")
         if enabled and str(enabled).strip() == "1":
@@ -418,16 +433,7 @@ async def show_stock(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: s
     except Exception as e:
         print(f"Error sending stock update: {e}")
 
-    products = db.get_products()
-    s = strings.STRINGS[lang]
-    msg = s["stock_title"] + "\n\n"
-    
-    for p in products:
-        title = p["title_ru"] if lang == "ru" else p["title_en"]
-        stock = p["stock"]
-        msg += f"• {title}: {stock} pcs\n"
-        
-    await update.message.reply_text(msg)
+    await _send_product_list(update, context, lang, edit_message=False)
 
 async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -454,23 +460,44 @@ async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         stock = product["stock"]
         
         if stock <= 0:
-            await query.edit_message_text(s["out_of_stock"])
+            # Out of stock flow
+            msg = s["out_of_stock_detailed"].format(name=title)
+            keyboard = [
+                [InlineKeyboardButton(s["btn_add_favorite"], callback_data=f"fav_{p_id}")],
+                [InlineKeyboardButton(s["btn_back"], callback_data="back_to_products")],
+                [InlineKeyboardButton(s["btn_back_categories"], callback_data="back_to_categories")] # If you have categories, else just fallback to products
+            ]
+            await query.edit_message_text(msg, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
             return
             
         text = f"<b>{title}</b>\n\n{desc}\n\nPrice: ${price}\nStock: {stock}"
         
         keyboard = [
             [InlineKeyboardButton(s["buy_button"].format(price=price), callback_data=f"buy_{p_id}")],
-            [InlineKeyboardButton(s["back"], callback_data="back_to_products")] 
+            [InlineKeyboardButton(s["btn_back"], callback_data="back_to_products")] 
         ]
         await query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(keyboard), parse_mode="HTML")
+        
+    elif data.startswith("fav_"):
+        p_id = int(data.split("_")[1])
+        db.add_favorite(user_id, p_id)
+        await query.answer(s["favorite_added_success"], show_alert=True)
+        # Keep same message but can optionally change the button to "✅ Added"
+
+    elif data == "back_to_categories":
+        # Placeholder for categories if added in future. For now acts like back_to_products
+        await _send_product_list(update, context, lang, edit_message=True)
+
+    elif data == "back_to_products":
+        # Re-show product lists formatted
+        await _send_product_list(update, context, lang, edit_message=True)
         
     elif data.startswith("buy_"):
         p_id = int(data.split("_")[1])
         product = db.get_product(p_id)
         
         if not product or product["stock"] <= 0:
-            await query.message.reply_text(s["out_of_stock"])
+            await query.message.reply_text(s.get("out_of_stock_detailed", "Out of stock.").format(name=product["title_en"] if product else "Unknown"))
             return
 
         price = product["price_usd"]

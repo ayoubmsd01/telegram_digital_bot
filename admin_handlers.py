@@ -397,8 +397,17 @@ async def edit_new_value_received(update: Update, context: ContextTypes.DEFAULT_
             return EDIT_NEW_VALUE
     
    # Update in database
+    old_stock = 0
+    if field == 'stock':
+        product = db.get_product(product_id)
+        if product:
+            old_stock = product['stock']
+
     db.update_product_field(product_id, field, new_value)
     
+    if field == 'stock' and old_stock == 0 and new_value > 0:
+        await trigger_restock_notifications(product_id, context)
+        
     await update.message.reply_text(f"✅ Product updated!\n{field} = {new_value}")
     context.user_data.clear()
     return ConversationHandler.END
@@ -546,6 +555,51 @@ async def stock_product_selected(update: Update, context: ContextTypes.DEFAULT_T
         await update.message.reply_text("❌ Invalid ID.")
         return STOCK_SELECT_PRODUCT
 
+async def trigger_restock_notifications(product_id: int, context: ContextTypes.DEFAULT_TYPE):
+    """Notify users who favorited this product if stock > 0."""
+    try:
+        product = db.get_product(product_id)
+        if not product or product["stock"] <= 0: return
+        
+        users_to_notify = db.get_product_favorites(product_id)
+        if not users_to_notify: return
+        
+        price = product["price_usd"]
+        stock = product["stock"]
+        
+        from telegram import InlineKeyboardMarkup, InlineKeyboardButton
+        import strings
+        
+        for user_id in users_to_notify:
+            # Check silent ban!
+            if db.is_banned(user_id):
+                continue
+                
+            lang = db.get_user_language(user_id) or "en"
+            s = strings.STRINGS[lang]
+            title = product["title_ru"] if lang == "ru" else product["title_en"]
+            
+            msg = s["restock_notification"].format(
+                name=title,
+                price=f"{price:.2f}",
+                stock=stock
+            )
+            
+            kb = [[InlineKeyboardButton(s["buy_from_restock"], callback_data=f"buy_{product_id}")]]
+            
+            try:
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=msg,
+                    reply_markup=InlineKeyboardMarkup(kb),
+                    parse_mode='HTML'
+                )
+            except Exception as e:
+                print(f"[RESTOCK NOTIFY] Failed for {user_id}: {e}")
+                
+    except Exception as e:
+        print(f"[ERROR] trigger_restock_notifications: {e}")
+
 async def stock_qty_received(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     """Handle quantity input."""
     if 'stock_product_id' not in context.user_data:
@@ -571,8 +625,10 @@ async def stock_qty_received(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         # If Link or File -> Update immediately
         if delivery_type in ['link', 'file']:
-            db.increment_stock(product_id, qty)
+            was_zero = db.increment_stock(product_id, qty)
             await update.message.reply_text(f"✅ Stock updated successfully (+{qty})!")
+            if was_zero:
+                await trigger_restock_notifications(product_id, context)
             context.user_data.clear()
             return ConversationHandler.END
             
@@ -587,8 +643,10 @@ async def stock_qty_received(update: Update, context: ContextTypes.DEFAULT_TYPE)
         
         # Unknown type fallback
         else:
-            db.increment_stock(product_id, qty)
+            was_zero = db.increment_stock(product_id, qty)
             await update.message.reply_text(f"✅ Stock updated successfully (+{qty})!")
+            if was_zero:
+                await trigger_restock_notifications(product_id, context)
             context.user_data.clear()
             return ConversationHandler.END
             
@@ -624,9 +682,11 @@ async def stock_codes_received(update: Update, context: ContextTypes.DEFAULT_TYP
     # Save codes and update stock
     try:
         db.add_codes_bulk(product_id, codes)
-        db.increment_stock(product_id, expected_qty)
+        was_zero = db.increment_stock(product_id, expected_qty)
         
         await update.message.reply_text(f"✅ Added {len(codes)} codes and updated stock!")
+        if was_zero:
+            await trigger_restock_notifications(product_id, context)
     except Exception as e:
         print(f"Error adding codes: {e}")
         await update.message.reply_text(f"❌ Error: {str(e)}")
@@ -686,8 +746,12 @@ async def codes_add_new_received(update: Update, context: ContextTypes.DEFAULT_T
     
     product_id = context.user_data['codes_product_id']
     count = db.add_codes_bulk(product_id, codes_list)
+    was_zero = db.increment_stock(product_id, count)
     
-    await update.message.reply_text(f"✅ Added {count} codes!")
+    await update.message.reply_text(f"✅ Added {count} codes and updated stock!")
+    if was_zero:
+        await trigger_restock_notifications(product_id, context)
+        
     context.user_data.clear()
     return ConversationHandler.END
 
