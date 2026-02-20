@@ -390,89 +390,96 @@ async def topup_check_callback(update: Update, context: ContextTypes.DEFAULT_TYP
         logger.error(f"Topup check error: {e}")
         await query.message.reply_text(s["topup_not_paid"])
 
-async def _send_category_list(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, edit_message=False):
-    """Helper to send the new formatted list of categories."""
+async def _send_all_products_grouped(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    """Send all active categories and their products grouped, chunked to handle long messages."""
     categories = db.get_categories(only_active=True)
     s = strings.STRINGS[lang]
     
     if not categories:
         msg = s.get("no_categories", "No categories available.")
-        if edit_message:
-            await update.callback_query.edit_message_text(msg)
+        if update.callback_query:
+            try:
+                await update.callback_query.edit_message_text(msg)
+            except Exception:
+                await update.callback_query.message.reply_text(msg)
         else:
             await update.message.reply_text(msg)
         return
 
-    keyboard = []
+    bot_username = context.bot.username
+    blocks = []
+    has_any_products = False
+    
     for c in categories:
         c_id = c["category_id"]
-        name = c["name_ru"] if lang == "ru" else c["name_en"]
-        keyboard.append([InlineKeyboardButton(f"📁 {name}", callback_data=f"cat_{c_id}")])
-    
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    msg_text = s.get("choose_category", "🗂 <b>Categories:</b>")
-    
-    if edit_message:
-        await update.callback_query.edit_message_text(msg_text, reply_markup=reply_markup, parse_mode='HTML')
-    else:
-        await update.message.reply_text(msg_text, reply_markup=reply_markup, parse_mode='HTML')
-
-async def _send_product_list(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str, category_id: int = None, edit_message=False):
-    """Helper to send the new formatted list of products."""
-    products = db.get_products(category_id=category_id, only_active=True)
-    s = strings.STRINGS[lang]
-    
-    if not products:
-        msg = s.get("no_products", "No products available in this category.")
-        keyboard = [[InlineKeyboardButton(s.get("btn_back_categories", "⬅️ Back"), callback_data="back_to_categories")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        if edit_message:
-            await update.callback_query.edit_message_text(msg, reply_markup=reply_markup)
+        cat_name = c["name_ru"] if lang == "ru" else c["name_en"]
+        products = db.get_products(category_id=c_id, only_active=True)
+        
+        # Only visible products with stock > 0
+        visible_products = [p for p in products if p["stock"] > 0]
+        
+        if not visible_products:
+            continue
+            
+        has_any_products = True
+            
+        block = f"— — — {cat_name} — — —\n"
+        for p in visible_products:
+            p_id = p["product_id"]
+            title = p["title_ru"] if lang == "ru" else p["title_en"]
+            price = p["price_usd"]
+            stock = p["stock"]
+            stock_text = f"{stock} шт." if lang == "ru" else f"{stock} pcs."
+            
+            parts = title.split('|', 1)
+            name_part = parts[0].strip()
+            rest_part = ""
+            if len(parts) > 1:
+                rest_part = " | " + parts[1].strip()
+                
+            link = f'<a href="https://t.me/{bot_username}?start=prod_{p_id}">{name_part}</a>'
+            line = f"{link}{rest_part} | {stock_text} | ${price:g}\n"
+            block += line
+            
+        block += "\n"
+        blocks.append(block)
+        
+    if not has_any_products:
+        msg = s.get("no_products", "No products available at the moment.")
+        if update.callback_query:
+            try:
+                await update.callback_query.edit_message_text(msg)
+            except Exception:
+                await update.callback_query.message.reply_text(msg)
         else:
-            await update.message.reply_text(msg, reply_markup=reply_markup)
+            await update.message.reply_text(msg)
         return
-
-    # Build Header
-    cat_name = ""
-    if category_id:
-        c = db.get_category(category_id)
-        if c:
-            cat_name = c["name_ru"] if lang == "ru" else c["name_en"]
+        
+    # Chunking
+    messages = []
+    current_msg = ""
+    for block in blocks:
+        if len(current_msg) + len(block) > 4000:
+            messages.append(current_msg)
+            current_msg = block
+        else:
+            current_msg += block
             
-    if cat_name:
-        msg = f"— — — {cat_name} — — —\n\n"
-    else:
-        msg = f"— — — 📦 Products — — —\n\n"
+    if current_msg:
+        messages.append(current_msg)
         
-    bot_username = context.bot.username
-    
-    for p in products:
-        p_id = p["product_id"]
-        title = p["title_ru"] if lang == "ru" else p["title_en"]
-        price = p["price_usd"]
-        stock = p["stock"]
-        
-        stock_text = f"{stock} шт." if lang == "ru" else f"{stock} pcs."
-        
-        parts = title.split('|', 1)
-        name_part = parts[0].strip()
-        rest_part = ""
-        if len(parts) > 1:
-            rest_part = " | " + parts[1].strip()
-            
-        link = f'<a href="https://t.me/{bot_username}?start=prod_{p_id}">{name_part}</a>'
-        line = f"{link}{rest_part} | {price:g} $ | {stock_text}\n"
-        msg += line
-    
-    # Add back button to categories
-    keyboard = [[InlineKeyboardButton(s.get("btn_back_categories", "⬅️ Back to categories"), callback_data="back_to_categories")]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    if edit_message:
-        await update.callback_query.edit_message_text(msg, reply_markup=reply_markup, parse_mode='HTML', disable_web_page_preview=True)
-    else:
-        await update.message.reply_text(msg, reply_markup=reply_markup, parse_mode='HTML', disable_web_page_preview=True)
+    for i, msg in enumerate(messages):
+        # We only try to edit the first message chunk to replace the previous bubble
+        if i == 0 and update.callback_query:
+            try:
+                await update.callback_query.edit_message_text(msg, parse_mode='HTML', disable_web_page_preview=True)
+            except Exception:
+                await update.callback_query.message.reply_text(msg, parse_mode='HTML', disable_web_page_preview=True)
+        else:
+            if update.message:
+                await update.message.reply_text(msg, parse_mode='HTML', disable_web_page_preview=True)
+            else:
+                await update.callback_query.message.reply_text(msg, parse_mode='HTML', disable_web_page_preview=True)
 
 async def _show_product_details(update: Update, context: ContextTypes.DEFAULT_TYPE, user_id: int, p_id: int, lang: str, edit_message=False):
     s = strings.STRINGS[lang]
@@ -490,14 +497,13 @@ async def _show_product_details(update: Update, context: ContextTypes.DEFAULT_TY
     stock = product["stock"]
     
     cat_id = product.get("category_id", None)
-    back_data = f"back_to_products_{cat_id}" if cat_id else "back_to_categories"
+    back_data = "back_to_store"
     
     if stock <= 0:
         msg = s["out_of_stock_detailed"].format(name=title)
         keyboard = [
             [InlineKeyboardButton(s["btn_add_favorite"], callback_data=f"fav_{p_id}")],
-            [InlineKeyboardButton(s["btn_back"], callback_data=back_data)],
-            [InlineKeyboardButton(s["btn_back_categories"], callback_data="back_to_categories")]
+            [InlineKeyboardButton(s["btn_back"], callback_data="back_to_store")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         if edit_message:
@@ -519,7 +525,7 @@ async def _show_product_details(update: Update, context: ContextTypes.DEFAULT_TY
         await update.message.reply_text(text, reply_markup=reply_markup, parse_mode="HTML")
 
 async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
-    await _send_category_list(update, context, lang, edit_message=False)
+    await _send_all_products_grouped(update, context, lang)
 
 async def show_stock(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
     # Check Published Stock Update (Alert) First
@@ -538,7 +544,7 @@ async def show_stock(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: s
     except Exception as e:
         print(f"Error sending stock update: {e}")
 
-    await _send_category_list(update, context, lang, edit_message=False)
+    await _send_all_products_grouped(update, context, lang)
 
 async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
@@ -565,14 +571,9 @@ async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         db.add_favorite(user_id, p_id)
         await query.answer(s.get("favorite_added_success", "Added to favorites!"), show_alert=True)
 
-    elif data == "back_to_categories":
-        await _send_category_list(update, context, lang, edit_message=True)
-
-    elif data.startswith("back_to_products"):
-        # Could be "back_to_products_None" or "back_to_products_{id}"
-        parts = data.split("_")
-        c_id = int(parts[3]) if len(parts) > 3 and parts[3] != 'None' else None
-        await _send_product_list(update, context, lang, category_id=c_id, edit_message=True)
+    elif data == "back_to_store" or data == "back_to_categories" or data.startswith("back_to_products"):
+        # Regardless of what back button previously existed, render grouped list
+        await _send_all_products_grouped(update, context, lang)
         
     elif data.startswith("buy_"):
         p_id = int(data.split("_")[1])
