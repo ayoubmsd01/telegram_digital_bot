@@ -1053,8 +1053,8 @@ def main() -> None:
     application.add_handler(CommandHandler("admin", admin_command))  # Alias for /ad
     application.add_handler(CommandHandler("debug_stock", admin_handlers.debug_stock_settings)) # Debug
     application.add_handler(CallbackQueryHandler(language_callback, pattern="^lang_"))
-    application.add_handler(CallbackQueryHandler(product_callback, pattern="^(cat_|prod_|buy_|fav_|back_to_)"))
     application.add_handler(CallbackQueryHandler(products_flow_callback, pattern="^prod_(cat:|item:|buy:|back_cats|back_items)"))
+    application.add_handler(CallbackQueryHandler(product_callback, pattern="^(cat_|prod_|buy_|fav_|back_to_)"))
     application.add_handler(CallbackQueryHandler(cancel_order_callback, pattern="^cancel_"))
     application.add_handler(CallbackQueryHandler(check_pay_callback, pattern="^checkpay:"))
     application.add_handler(CallbackQueryHandler(admin_handlers.admin_publish_stock_callback, pattern="^admin_publish_stock$"))
