@@ -274,6 +274,27 @@ def get_user_language(user_id):
     conn.close()
     return row['language'] if row else None
 
+def get_user_profile(user_id):
+    """Get user profile data (joined_at, language, username)."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id, language, username, joined_at FROM users WHERE user_id = ?', (user_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return dict(row) if row else None
+
+def get_user_purchases_count(user_id):
+    """Count completed purchases (paid or delivered) for a user."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT COUNT(*) as cnt FROM orders WHERE user_id = ? AND status IN ('paid', 'delivered')",
+        (user_id,)
+    )
+    row = cursor.fetchone()
+    conn.close()
+    return row['cnt'] if row else 0
+
 def get_products():
     conn = get_connection()
     cursor = conn.cursor()

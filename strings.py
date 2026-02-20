@@ -7,6 +7,7 @@ STRINGS = {
         "menu_rules": "📜 Правила",
         "menu_help": "🆘 Помощь",
         "menu_projects": "🚀 Наши проекты",
+        "menu_profile": "👤 Профиль",
         "back": "⬅️ Назад",
         "products_title": "Выберите категорию или товар:",
         "stock_title": "📦 Наличие товаров:",
@@ -51,6 +52,7 @@ STRINGS = {
         "product_delivered": "🎁 Спасибо за покупку!\nВаш товар:\n{content}",
         "check_payment": "🔄 Проверить оплату",
         "choose_product": "Выберите товар:",
+        "profile_text": "👤 <b>Ваш профиль:</b>\n\n────────────────────\n\n🪣 Мой ID: <code>{user_id}</code>\n\n💰 Мой баланс: {balance} $\n\n🛒 Количество покупок: {purchases_count}\n\n⏱ Регистрация: {registered_at}\n\n────────────────────\nℹ️ <i>Usernames update automatically when users interact.</i>",
     },
     "en": {
         "welcome": "Welcome! Please choose your language.",
@@ -60,6 +62,7 @@ STRINGS = {
         "menu_rules": "📜 Rules",
         "menu_help": "🆘 Help",
         "menu_projects": "🚀 Our projects",
+        "menu_profile": "👤 Profile",
         "back": "⬅️ Back",
         "products_title": "Choose a product:",
         "stock_title": "📦 Product Stock:",
@@ -104,6 +107,7 @@ STRINGS = {
         "product_delivered": "🎁 Thank you for your purchase!\nHere is your item:\n{content}",
         "check_payment": "🔄 Check Payment",
         "choose_product": "Choose a product:",
+        "profile_text": "👤 <b>Your profile:</b>\n\n────────────────────\n\n🪣 My ID: <code>{user_id}</code>\n\n💰 My balance: {balance} $\n\n🛒 Purchases: {purchases_count}\n\n⏱ Registration: {registered_at}\n\n────────────────────\nℹ️ <i>Usernames update automatically when users interact.</i>",
     }
 }
 
@@ -111,11 +115,11 @@ KEYBOARDS = {
     "ru": [
         ["📦 Товары", "📊 Наличие товаров"],
         ["📜 Правила", "🆘 Помощь"],
-        ["🚀 Наши проекты"]
+        ["🚀 Наши проекты", "👤 Профиль"]
     ],
     "en": [
         ["📦 Products", "📊 Stock"],
         ["📜 Rules", "🆘 Help"],
-        ["🚀 Our projects"]
+        ["🚀 Our projects", "👤 Profile"]
     ]
 }

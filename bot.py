@@ -160,11 +160,41 @@ async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         await update.message.reply_text(s["help_text"])
     elif text == s["menu_projects"]:
         await update.message.reply_text(s["projects_text"])
+    elif text == s["menu_profile"]:
+        await show_profile(update, context, lang)
     elif text == s["back"] or text == "⬅️ Back":
         await show_main_menu(update, context, lang)
     else:
         # Unknown button, just ignore it
         pass
+
+async def show_profile(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
+    """Show user profile with ID, balance, purchases count, and registration date."""
+    user = update.effective_user
+    user_id = user.id
+    s = strings.STRINGS[lang]
+    
+    # Get profile data
+    profile = db.get_user_profile(user_id)
+    purchases_count = db.get_user_purchases_count(user_id)
+    
+    # Format registration date
+    registered_at = "—"
+    if profile and profile.get('joined_at'):
+        registered_at = str(profile['joined_at'])[:10]
+    
+    # Balance (no balance system yet, default 0)
+    balance = "0.00"
+    
+    # Build profile message
+    msg = s["profile_text"].format(
+        user_id=user_id,
+        balance=balance,
+        purchases_count=purchases_count,
+        registered_at=registered_at
+    )
+    
+    await update.message.reply_text(msg, parse_mode='HTML')
 
 async def show_products(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
     products = db.get_products()
