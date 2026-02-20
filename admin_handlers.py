@@ -32,6 +32,9 @@ ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "").lower()
 # Conversation states for Manage Codes
 (CODES_SELECT_PRODUCT, CODES_ADD_NEW) = range(17, 19)
 
+# Conversation states for Ban Management
+(BAN_ENTER_ID, UNBAN_ENTER_ID) = range(19, 21)
+
 def is_admin(user) -> bool:
     """Check if user is admin by user_id or username."""
     if not user:
@@ -58,7 +61,8 @@ def is_command_button(text: str) -> bool:
     buttons = [
         "➕ Add Product", "✏️ Edit Product", "🗑️ Delete Product",
         "📦 Manage Stock", "📤 Manage Files", "🔑 Manage Codes",
-        "📊 Recent Orders", "👥 Users Stats", "⬅️ Back", "/start", "/admin", "/ad"
+        "📊 Recent Orders", "👥 Users Stats", "🚫 Ban Management",
+        "⬅️ Back", "/start", "/admin", "/ad"
     ]
     return text in buttons or text.startswith("/")
 
@@ -76,7 +80,8 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         ["➕ Add Product", "✏️ Edit Product"],
         ["🗑️ Delete Product", "📦 Manage Stock"],
         ["🔑 Manage Codes", "📊 Recent Orders"],
-        ["👥 Users Stats", "⬅️ Back"]
+        ["👥 Users Stats", "🚫 Ban Management"],
+        ["⬅️ Back"]
     ]
     
     await update.message.reply_text(
@@ -813,12 +818,19 @@ async def admin_publish_stock_callback(update: Update, context: ContextTypes.DEF
             users = db.get_all_users()
             sent_count = 0
             fail_count = 0
+            ban_skip = 0
             total_db = len(users)
             
             # Use background task logic conceptually, but run here for simplicity as user requested
             for i, u in enumerate(users):
                 try:
                     uid = u['user_id']
+                    
+                    # Skip banned users silently — no broadcast for them
+                    if db.is_banned(uid):
+                        ban_skip += 1
+                        continue
+                    
                     ulang = u.get('language')
                     text = msg_ru if ulang == 'ru' else msg_en
                     
@@ -836,6 +848,7 @@ async def admin_publish_stock_callback(update: Update, context: ContextTypes.DEF
                 f"✅ <b>Broadcast Completed!</b>\n"
                 f"• Sent: {sent_count}\n"
                 f"• Failed: {fail_count} (Blocked/Deleted)\n"
+                f"• Banned (skipped): {ban_skip}\n"
                 f"• Total DB Users: {total_db}"
             )
             
@@ -925,3 +938,158 @@ async def cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.message.reply_text(s["operation_canceled"], reply_markup=ReplyKeyboardRemove())
     context.user_data.clear()
     return ConversationHandler.END
+
+# ============================================================================
+# SILENT BAN MANAGEMENT
+# ============================================================================
+
+async def ban_management_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show the ban management panel with inline buttons."""
+    user = update.effective_user
+    if not is_admin(user):
+        return  # Silent ignore for non-admins
+    
+    banned_count = len(db.get_banned_users())
+    
+    keyboard = [
+        [InlineKeyboardButton("🚫 Ban User by ID", callback_data="ban_start")],
+        [InlineKeyboardButton("✅ Unban User by ID", callback_data="unban_start")],
+        [InlineKeyboardButton("📋 View Banned List", callback_data="ban_list")]
+    ]
+    
+    await update.message.reply_text(
+        f"🚫 <b>Silent Ban Management</b>\n\n"
+        f"Currently banned: <b>{banned_count}</b> users\n\n"
+        f"ℹ️ <i>Banned users are completely ignored by the bot.\n"
+        f"They receive no responses, no broadcasts, no notifications.\n"
+        f"They will never know they are banned.</i>",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='HTML'
+    )
+
+async def ban_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Handle ban management inline button clicks."""
+    query = update.callback_query
+    user = query.from_user
+    
+    if not is_admin(user):
+        return  # Silent ignore
+    
+    await query.answer()
+    data = query.data
+    
+    if data == "ban_start":
+        await query.message.reply_text(
+            "🚫 <b>Ban User</b>\n\n"
+            "Send the <b>user ID</b> (numeric) to ban:\n\n"
+            "<i>Send /cancel to cancel.</i>",
+            parse_mode='HTML'
+        )
+        context.user_data['awaiting_ban_id'] = True
+        
+    elif data == "unban_start":
+        # Show current banned list first for reference
+        banned = db.get_banned_users()
+        if not banned:
+            await query.message.reply_text("✅ No banned users to unban.")
+            return
+        
+        msg = "✅ <b>Unban User</b>\n\nCurrently banned:\n"
+        for i, b in enumerate(banned, 1):
+            msg += f"{i}. <code>{b['user_id']}</code> (since {str(b['banned_at'])[:10]})\n"
+        msg += "\nSend the <b>user ID</b> to unban:\n<i>Send /cancel to cancel.</i>"
+        
+        await query.message.reply_text(msg, parse_mode='HTML')
+        context.user_data['awaiting_unban_id'] = True
+        
+    elif data == "ban_list":
+        banned = db.get_banned_users()
+        
+        if not banned:
+            await query.message.reply_text("📋 <b>Banned Users</b>\n\n✅ No banned users.", parse_mode='HTML')
+            return
+        
+        msg = f"📋 <b>Banned Users ({len(banned)}):</b>\n\n"
+        for i, b in enumerate(banned, 1):
+            uid = b['user_id']
+            date = str(b['banned_at'])[:10]
+            msg += f"{i}. <code>{uid}</code> — banned {date}\n"
+        
+        await query.message.reply_text(msg, parse_mode='HTML')
+
+async def process_ban_unban_input(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Process ban/unban ID input from admin. Returns True if handled."""
+    user = update.effective_user
+    if not is_admin(user):
+        return False
+    
+    text = update.message.text.strip()
+    
+    # Handle /cancel
+    if text == '/cancel':
+        context.user_data.pop('awaiting_ban_id', None)
+        context.user_data.pop('awaiting_unban_id', None)
+        await update.message.reply_text("❌ Operation cancelled.")
+        return True
+    
+    # Handle ban input
+    if context.user_data.get('awaiting_ban_id'):
+        context.user_data.pop('awaiting_ban_id', None)
+        
+        try:
+            target_id = int(text)
+        except ValueError:
+            await update.message.reply_text("❌ Invalid ID. Must be a number. Try again from Ban Management.")
+            return True
+        
+        # Don't allow banning yourself
+        if target_id == user.id:
+            await update.message.reply_text("❌ You cannot ban yourself!")
+            return True
+        
+        newly_banned = db.ban_user(target_id)
+        
+        if newly_banned:
+            await update.message.reply_text(
+                f"🚫 <b>User Banned!</b>\n\n"
+                f"User ID: <code>{target_id}</code>\n"
+                f"Status: Silently banned ✅\n\n"
+                f"<i>The user will receive no responses or notifications.\n"
+                f"They will never know they are banned.</i>",
+                parse_mode='HTML'
+            )
+        else:
+            await update.message.reply_text(
+                f"ℹ️ User <code>{target_id}</code> is already banned.",
+                parse_mode='HTML'
+            )
+        return True
+    
+    # Handle unban input
+    if context.user_data.get('awaiting_unban_id'):
+        context.user_data.pop('awaiting_unban_id', None)
+        
+        try:
+            target_id = int(text)
+        except ValueError:
+            await update.message.reply_text("❌ Invalid ID. Must be a number. Try again from Ban Management.")
+            return True
+        
+        was_banned = db.unban_user(target_id)
+        
+        if was_banned:
+            await update.message.reply_text(
+                f"✅ <b>User Unbanned!</b>\n\n"
+                f"User ID: <code>{target_id}</code>\n"
+                f"Status: Unblocked ✅\n\n"
+                f"<i>The user can now use the bot normally.</i>",
+                parse_mode='HTML'
+            )
+        else:
+            await update.message.reply_text(
+                f"ℹ️ User <code>{target_id}</code> is not in the ban list.",
+                parse_mode='HTML'
+            )
+        return True
+    
+    return False  # Not a ban/unban input

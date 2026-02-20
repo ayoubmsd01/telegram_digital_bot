@@ -136,9 +136,92 @@ def init_db():
         )
     ''')
     
+    # Bans table for Silent Ban system
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS bans (
+            user_id INTEGER PRIMARY KEY,
+            banned_at TEXT NOT NULL
+        )
+    ''')
+    
     conn.commit()
     conn.close()
+    
+    # Initialize the ban cache
+    _refresh_ban_cache()
+    
     print("Database tables initialized successfully.")
+
+# ============================================================================
+# SILENT BAN SYSTEM
+# ============================================================================
+
+# In-memory cache for banned user IDs (fast O(1) lookup per message)
+_banned_users_cache = set()
+
+def _refresh_ban_cache():
+    """Reload the banned users set from the database."""
+    global _banned_users_cache
+    try:
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute('SELECT user_id FROM bans')
+        rows = cursor.fetchall()
+        conn.close()
+        _banned_users_cache = {row['user_id'] for row in rows}
+    except Exception:
+        pass  # Keep existing cache on error
+
+def is_banned(user_id: int) -> bool:
+    """Check if a user is banned. Uses in-memory cache for speed."""
+    return user_id in _banned_users_cache
+
+def ban_user(user_id: int) -> bool:
+    """Ban a user silently. Returns True if newly banned, False if already banned."""
+    import datetime as dt
+    conn = get_connection()
+    cursor = conn.cursor()
+    try:
+        cursor.execute(
+            'INSERT OR IGNORE INTO bans (user_id, banned_at) VALUES (?, ?)',
+            (user_id, dt.datetime.now().isoformat())
+        )
+        conn.commit()
+        newly_banned = cursor.rowcount > 0
+    except Exception:
+        newly_banned = False
+    finally:
+        conn.close()
+    
+    # Update cache immediately
+    _banned_users_cache.add(user_id)
+    return newly_banned
+
+def unban_user(user_id: int) -> bool:
+    """Unban a user. Returns True if was banned, False if wasn't."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM bans WHERE user_id = ?', (user_id,))
+    conn.commit()
+    was_banned = cursor.rowcount > 0
+    conn.close()
+    
+    # Update cache immediately
+    _banned_users_cache.discard(user_id)
+    return was_banned
+
+def get_banned_users():
+    """Get all banned users with their ban dates."""
+    conn = get_connection()
+    cursor = conn.cursor()
+    cursor.execute('SELECT user_id, banned_at FROM bans ORDER BY banned_at DESC')
+    rows = cursor.fetchall()
+    conn.close()
+    return [dict(row) for row in rows]
+
+# ============================================================================
+# USER MANAGEMENT
+# ============================================================================
 
 def add_user(user_id, language, username=None):
     conn = get_connection()

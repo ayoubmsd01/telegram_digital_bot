@@ -30,8 +30,24 @@ LANG_KEYBOARD = InlineKeyboardMarkup([
      InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")]
 ])
 
+# ============================================================================
+# SILENT BAN GUARD - Checks BEFORE any processing
+# ============================================================================
+
+def is_user_banned(update: Update) -> bool:
+    """Check if the user who triggered this update is banned.
+    If banned, we return True and the handler must immediately return
+    without sending any response — complete silent ignore."""
+    user = update.effective_user
+    if not user:
+        return False
+    return db.is_banned(user.id)
+
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Send a message when the command /start is issued."""
+    if is_user_banned(update):
+        return  # Silent ignore — banned user gets nothing
+    
     user = update.effective_user
     db_lang = db.get_user_language(user.id)
     
@@ -67,6 +83,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
 
 async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle language selection."""
+    if is_user_banned(update):
+        return  # Silent ignore
+    
     query = update.callback_query
     await query.answer()
     
@@ -80,6 +99,8 @@ async def language_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 async def admin_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle /ad command to open admin panel."""
+    if is_user_banned(update):
+        return  # Silent ignore
     await admin_handlers.admin_panel(update, context)
 
 async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lang: str):
@@ -102,7 +123,17 @@ async def show_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE, lan
 
 async def menu_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     """Handle menu button clicks."""
+    if is_user_banned(update):
+        return  # Silent ignore — banned user gets nothing
+    
     user_id = update.effective_user.id
+    
+    # Check if admin is waiting for ban/unban input
+    if admin_handlers.is_admin(update.effective_user):
+        handled = await admin_handlers.process_ban_unban_input(update, context)
+        if handled:
+            return
+    
     lang = db.get_user_language(user_id)
     if not lang:
         await start(update, context) # Fallback
@@ -192,6 +223,9 @@ async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
     
     data = query.data
     user_id = query.from_user.id
+    if is_user_banned(update):
+        return  # Silent ignore
+    
     lang = db.get_user_language(user_id) or "en"
     s = strings.STRINGS[lang]
 
@@ -294,6 +328,8 @@ async def product_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         await query.edit_message_text(s["choose_product"], reply_markup=InlineKeyboardMarkup(keyboard))
 
 async def cancel_order_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if is_user_banned(update):
+        return  # Silent ignore
     query = update.callback_query
     await query.answer()
     data = query.data
@@ -334,6 +370,8 @@ async def check_expirations(context: ContextTypes.DEFAULT_TYPE):
                 pass
 
 async def check_pay_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if is_user_banned(update):
+        return  # Silent ignore
     query = update.callback_query
     await query.answer()
 
@@ -531,6 +569,10 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(check_pay_callback, pattern="^checkpay:"))
     application.add_handler(CallbackQueryHandler(admin_handlers.admin_publish_stock_callback, pattern="^admin_publish_stock$"))
     application.add_handler(CallbackQueryHandler(admin_handlers.admin_hide_stock_callback, pattern="^admin_hide_stock$"))
+    
+    # Ban Management handlers
+    application.add_handler(MessageHandler(filters.Regex("^🚫 Ban Management$"), admin_handlers.ban_management_panel))
+    application.add_handler(CallbackQueryHandler(admin_handlers.ban_callback, pattern="^(ban_start|unban_start|ban_list)$"))
     
     application.add_handler(MessageHandler(filters.TEXT, menu_handler))
 
