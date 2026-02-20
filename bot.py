@@ -68,6 +68,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                     return
                 except ValueError:
                     pass
+            elif arg.startswith("cat_"):
+                # If they click a category, just show the whole catalog
+                await _send_all_products_grouped(update, context, db_lang)
+                return
 
         await show_main_menu(update, context, db_lang)
         
@@ -423,7 +427,8 @@ async def _send_all_products_grouped(update: Update, context: ContextTypes.DEFAU
             
         has_any_products = True
             
-        block = f"— — — {cat_name} — — —\n"
+        cat_link = f'<a href="https://t.me/{bot_username}?start=cat_{c_id}">{cat_name}</a>'
+        block = f"— — — {cat_link} — — —\n"
         for p in visible_products:
             p_id = p["product_id"]
             title = p["title_ru"] if lang == "ru" else p["title_en"]
@@ -431,14 +436,9 @@ async def _send_all_products_grouped(update: Update, context: ContextTypes.DEFAU
             stock = p["stock"]
             stock_text = f"{stock} шт." if lang == "ru" else f"{stock} pcs."
             
-            parts = title.split('|', 1)
-            name_part = parts[0].strip()
-            rest_part = ""
-            if len(parts) > 1:
-                rest_part = " | " + parts[1].strip()
-                
-            link = f'<a href="https://t.me/{bot_username}?start=prod_{p_id}">{name_part}</a>'
-            line = f"{link}{rest_part} | {stock_text} | ${price:g}\n"
+            # Use the entire title as the link
+            prod_link = f'<a href="https://t.me/{bot_username}?start=prod_{p_id}">{title}</a>'
+            line = f"{prod_link} | {stock_text} | ${price:g}\n"
             block += line
             
         block += "\n"
