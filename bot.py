@@ -785,6 +785,14 @@ def main() -> None:
         return
         
     db.init_db()
+    
+    # Run migrations for stock items and categories
+    import migrate_stock
+    try:
+        migrate_stock.run_migration()
+    except Exception as e:
+        print(f"Migration error: {e}")
+        
     application = Application.builder().token(BOT_TOKEN).post_init(post_init).build()
     
     # Register global error handler to prevent crashes
