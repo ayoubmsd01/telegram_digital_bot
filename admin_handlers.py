@@ -82,7 +82,8 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         ["➕ Add Product/Stock", "✏️ Edit Product"],
         ["🗑️ Delete Product", "📊 Recent Orders"],
         ["👥 Users Stats", "🚫 Ban Management"],
-        ["➕ Add Balance", "⬅️ Back"]
+        ["➕ Add Balance", "🧹 Reset catalog"],
+        ["⬅️ Back"]
     ]
     
     await update.message.reply_text(
@@ -102,6 +103,92 @@ async def admin_panel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> Non
         reply_markup=InlineKeyboardMarkup(stock_keyboard), 
         parse_mode='HTML'
     )
+
+# ============================================================================
+# RESET CATALOG HANDLERS
+# ============================================================================
+
+async def reset_catalog_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not is_admin(update.effective_user):
+        return
+        
+    s = STRINGS.get(get_lang(update.effective_user.id), STRINGS['en'])
+    msg = (
+        "⚠️ <b>WARNING!</b> ⚠️\n\n"
+        "You are about to completely wipe out the catalog.\n"
+        "This will permanently delete:\n"
+        "- All Categories\n"
+        "- All Products\n"
+        "- All Stock Items\n"
+        "- All Favorites\n"
+        "- All active test data\n\n"
+        "Users and Balances will remain unchanged.\n\n"
+        "Are you absolutely sure you want to perform a 🧹 Reset?"
+    )
+    
+    keyboard = [
+        [InlineKeyboardButton("✅ Yes, Delete Everything", callback_data="reset_catalog_confirm")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="reset_catalog_cancel")]
+    ]
+    await update.message.reply_text(
+        msg,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode='HTML'
+    )
+
+async def reset_catalog_action(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    query = update.callback_query
+    await query.answer()
+    if not is_admin(update.effective_user):
+        return
+        
+    data = query.data
+    if data == "reset_catalog_cancel":
+        await query.edit_message_text("✅ Catalog reset cancelled.")
+        return
+        
+    if data == "reset_catalog_confirm":
+        # Perform the actual wipe using DB
+        import database as db
+        conn = db.get_connection()
+        c = conn.cursor()
+        
+        try:
+            # Count beforehand for logging
+            c.execute("SELECT COUNT(*) FROM favorites")
+            favs = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM stock_items")
+            stocks = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM products")
+            prods = c.fetchone()[0]
+            c.execute("SELECT COUNT(*) FROM categories")
+            cats = c.fetchone()[0]
+            
+            c.execute("DELETE FROM favorites")
+            c.execute("DELETE FROM stock_items")
+            c.execute("DELETE FROM products")
+            c.execute("DELETE FROM categories")
+            
+            # Reset auto increments
+            c.execute("DELETE FROM sqlite_sequence WHERE name IN ('favorites', 'stock_items', 'products', 'categories')")
+            
+            conn.commit()
+            
+            msg = (
+                "🧹 <b>Catalog Reset Successful!</b>\n\n"
+                f"🗑 {favs} Favorites deleted.\n"
+                f"🗑 {stocks} Stock Items deleted.\n"
+                f"🗑 {prods} Products deleted.\n"
+                f"🗑 {cats} Categories deleted.\n\n"
+                "The bot is now totally empty of products."
+            )
+            await query.edit_message_text(msg, parse_mode='HTML')
+            
+        except Exception as e:
+            logger.error(f"Catalog Reset Error: {e}")
+            await query.edit_message_text(f"❌ Error during reset: {e}")
+        finally:
+            conn.close()
 
 # ============================================================================
 # ADD PRODUCT HANDLERS

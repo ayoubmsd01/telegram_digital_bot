@@ -15,6 +15,8 @@ PRODUCT_SELECT_OPTION = 2003
 PRODUCT_SELECT_CAT = 2004
 PRODUCT_TITLE_RU = 2005
 PRODUCT_TITLE_EN = 2006
+PRODUCT_DESC_RU = 2008
+PRODUCT_DESC_EN = 2009
 PRODUCT_PRICE = 2007
 
 STOCK_SELECT_CAT = 2010
@@ -123,6 +125,16 @@ async def product_title_ru(update: Update, context: ContextTypes.DEFAULT_TYPE) -
 
 async def product_title_en(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     context.user_data['title_en'] = update.message.text
+    await update.message.reply_text("📥 Enter product description in Russian:")
+    return PRODUCT_DESC_RU
+
+async def product_desc_ru(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data['desc_ru'] = update.message.text
+    await update.message.reply_text("📥 Enter product description in English:")
+    return PRODUCT_DESC_EN
+    
+async def product_desc_en(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data['desc_en'] = update.message.text
     await update.message.reply_text("📥 Enter the price in USD (e.g. 5.99):")
     return PRODUCT_PRICE
 
@@ -137,13 +149,15 @@ async def product_price(update: Update, context: ContextTypes.DEFAULT_TYPE) -> i
     cat_id = context.user_data['cat_id']
     ru = context.user_data['title_ru']
     en = context.user_data['title_en']
+    dru = context.user_data.get('desc_ru', '')
+    den = context.user_data.get('desc_en', '')
     
     # Insert product
     conn = db.get_connection()
     c = conn.cursor()
     c.execute(
-        "INSERT INTO products (title_ru, title_en, price_usd, category_id, stock) VALUES (?, ?, ?, ?, 0)",
-        (ru, en, price, cat_id)
+        "INSERT INTO products (title_ru, title_en, desc_ru, desc_en, price_usd, category_id, stock) VALUES (?, ?, ?, ?, ?, ?, 0)",
+        (ru, en, dru, den, price, cat_id)
     )
     prod_id = c.lastrowid
     conn.commit()
@@ -286,6 +300,8 @@ add_product_stock_conv = ConversationHandler(
         PRODUCT_SELECT_CAT: [CallbackQueryHandler(product_cat_selected, pattern="^selcat_")],
         PRODUCT_TITLE_RU: [MessageHandler(filters.TEXT & ~filters.COMMAND, product_title_ru)],
         PRODUCT_TITLE_EN: [MessageHandler(filters.TEXT & ~filters.COMMAND, product_title_en)],
+        PRODUCT_DESC_RU: [MessageHandler(filters.TEXT & ~filters.COMMAND, product_desc_ru)],
+        PRODUCT_DESC_EN: [MessageHandler(filters.TEXT & ~filters.COMMAND, product_desc_en)],
         PRODUCT_PRICE: [MessageHandler(filters.TEXT & ~filters.COMMAND, product_price)],
         
         STOCK_SELECT_CAT: [CallbackQueryHandler(stock_cat_selected, pattern="^selcat_")],

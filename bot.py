@@ -897,6 +897,10 @@ def main() -> None:
     application.add_handler(CallbackQueryHandler(admin_handlers.admin_publish_stock_callback, pattern="^admin_publish_stock$"))
     application.add_handler(CallbackQueryHandler(admin_handlers.admin_hide_stock_callback, pattern="^admin_hide_stock$"))
     
+    # Reset Catalog handlers
+    application.add_handler(MessageHandler(filters.Regex("^🧹 Reset catalog$"), admin_handlers.reset_catalog_prompt))
+    application.add_handler(CallbackQueryHandler(admin_handlers.reset_catalog_action, pattern="^reset_catalog_"))
+    
     # Ban Management handlers
     application.add_handler(MessageHandler(filters.Regex("^🚫 Ban Management$"), admin_handlers.ban_management_panel))
     application.add_handler(CallbackQueryHandler(admin_handlers.ban_callback, pattern="^(ban_start|unban_start|ban_list)$"))
