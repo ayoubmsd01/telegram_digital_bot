@@ -917,11 +917,11 @@ async def show_users_stats(update: Update, context: ContextTypes.DEFAULT_TYPE) -
         if uname and uname != 'None':
             user_ref = f"@{uname}"
         else:
-             user_ref = f"<code>{uid}</code>"
+            user_ref = "No Username"
              
         date_str = str(joined)[:10] if joined else ""
         
-        msg += f"{shown+1}. {user_ref} | {date_str}\n"
+        msg += f"{shown+1}. {user_ref} | ID: <code>{uid}</code> | {date_str}\n"
         shown += 1
         
     msg += "\nℹ️ <i>Usernames update automatically when users interact.</i>"
